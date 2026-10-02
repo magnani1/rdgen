@@ -729,6 +729,18 @@ jobs:
         run: |
           mv ./SignOutput/rustdesk.msi "./SignOutput/${{ env.filename }}.msi" || echo "rustdesk"
 
+      # Preserve RDGen build artifacts
+      - name: Preserve RDGen build artifacts
+        if: ${{ env.rdgen == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdgen-${{ env.uuid }}-${{ env.filename }}
+          path: |
+            ./SignOutput/${{ env.filename }}.exe
+            ./SignOutput/${{ env.filename }}.msi
+          if-no-files-found: error
+          retention-days: 7
+
       - name: send file to rdgen server
         if: ${{ env.rdgen == 'true' }}
         uses: nick-fields/retry@v3
