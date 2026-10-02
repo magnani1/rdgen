@@ -738,8 +738,29 @@ jobs:
           retry_wait_seconds: 15
           shell: bash
           command: |
-            curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
-            curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client || true
+            echo "Enviando EXE para o RDGen..."
+            curl --fail-with-body \
+              --retry 5 \
+              --retry-all-errors \
+              --retry-delay 10 \
+              --connect-timeout 30 \
+              --max-time 600 \
+              -H "Authorization: Bearer ${{ env.token }}" \
+              -F "file=@./SignOutput/${{ env.filename }}.exe" \
+              -F "uuid=${{ env.uuid }}" \
+              "${{ secrets.GENURL }}/save_custom_client"
+
+            echo "Enviando MSI para o RDGen..."
+            curl --fail-with-body \
+              --retry 5 \
+              --retry-all-errors \
+              --retry-delay 10 \
+              --connect-timeout 30 \
+              --max-time 600 \
+              -H "Authorization: Bearer ${{ env.token }}" \
+              -F "file=@./SignOutput/${{ env.filename }}.msi" \
+              -F "uuid=${{ env.uuid }}" \
+              "${{ secrets.GENURL }}/save_custom_client" || true
 
       - name: send file to api server
         if: ${{ env.rdgen == 'false' }}
