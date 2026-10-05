@@ -78,6 +78,7 @@ jobs:
                 --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' |
               sed 's/^v//' |
               grep -E '^[0-9]+\.[0-9]+\.[0-9]+
+
           if [ -z "$VERSION" ]; then
             echo "Nao foi possivel determinar a ultima stable."
             exit 1
@@ -419,7 +420,7 @@ jobs:
       needs.linux.result == 'success' &&
       needs.macos.result == 'success'
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Baixar artefatos
@@ -815,7 +816,7 @@ jobs:
       needs.linux.result == 'success' &&
       needs.macos.result == 'success'
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Baixar artefatos
