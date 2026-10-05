@@ -37,7 +37,7 @@ env:
   WEBSITE: "https://suporte.magbel.com.br"
 
   # Chave publica RustDesk. Nao e credencial secreta.
-  PUBLIC_KEY: "C8F+OtI1MIGs193mJnfYZcwl5iLmOWev5s+8gTWmFkE="
+  PUBLIC_KEY: "C8F+OtI1MIGs193mJnfYZcwl5iLmOWev5s+8gTWmFkE="\n  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
 
 jobs:
   resolve:
@@ -227,6 +227,42 @@ jobs:
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
             libpam0g-dev
+
+      - name: Exportar cache do GitHub para vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Preparar vcpkg oficial
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Instalar dependencias vcpkg do RustDesk
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y libva-dev
+
+          if ! "$VCPKG_ROOT/vcpkg" \
+              install \
+              --triplet x64-linux \
+              --x-install-root="$VCPKG_ROOT/installed"; then
+            echo "=== logs do vcpkg ==="
+            find "$VCPKG_ROOT" -name "*.log" -type f | while read -r log; do
+              echo "===== $log ====="
+              tail -n 200 "$log" || true
+            done
+            exit 1
+          fi
+
+          echo "VCPKG_ROOT=$VCPKG_ROOT"
+          "$VCPKG_ROOT/vcpkg" list | head -100
 
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
