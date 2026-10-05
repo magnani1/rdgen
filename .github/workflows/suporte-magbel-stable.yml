@@ -64,7 +64,14 @@ jobs:
           set -euo pipefail
 
           if [ -n "${REQUESTED_VERSION:-}" ]; then
-            VERSION="${REQUESTED_VERSION#v}"
+            # Aceita tanto "1.5.0"/"v1.5.0" quanto textos vindos da UI,
+            # extraindo apenas o primeiro SemVer estavel encontrado.
+            VERSION="$(
+              printf '%s\n' "$REQUESTED_VERSION" |
+              grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+' |
+              head -1 |
+              sed 's/^v//'
+            )"
           else
             VERSION="$(
               gh api \
@@ -72,7 +79,398 @@ jobs:
                 repos/rustdesk/rustdesk/releases \
                 --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' |
               sed 's/^v//' |
-              grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' |
+              grep -E '^[0-9]+\.[0-9]+\.[0-9]+
+          if [ -z "$VERSION" ]; then
+            echo "Nao foi possivel determinar a ultima stable."
+            exit 1
+          fi
+
+          # Confirma que a tag realmente existe no RustDesk.
+          if ! git ls-remote \
+              --exit-code \
+              --tags \
+              https://github.com/rustdesk/rustdesk.git \
+              "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "Tag RustDesk '$VERSION' nao encontrada."
+            exit 1
+          fi
+
+          TAG="suporte-magbel-v${VERSION}"
+
+          BUILD=true
+          if gh release view "$TAG" \
+              --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            if [ "${FORCE_BUILD:-false}" != "true" ]; then
+              BUILD=false
+            fi
+          fi
+
+          echo "Stable RustDesk: $VERSION"
+          echo "Release Magbel: $TAG"
+          echo "Build necessario: $BUILD"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows x64
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Magbel
+        uses: actions/checkout@v4
+        with:
+          path: magbel
+
+      - name: Checkout RustDesk stable
+        uses: actions/checkout@v4
+        with:
+          repository: rustdesk/rustdesk
+          ref: refs/tags/${{ needs.resolve.outputs.version }}
+          submodules: recursive
+          path: rustdesk
+
+      - name: Preparar branding e configuracao
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+
+          cp ../magbel/branding/icon.png ./res/icon.png
+
+          python ../magbel/.github/scripts/magbel_patch.py \
+            --root . \
+            --product "$PRODUCT_NAME" \
+            --company "$COMPANY_NAME" \
+            --server "$SERVER" \
+            --port "$SERVER_PORT" \
+            --key "$PUBLIC_KEY" \
+            --api "$API_SERVER" \
+            --website "$WEBSITE"
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.24.5"
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Windows x64
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          python ./build.py --flutter
+
+      - name: Localizar EXE
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+
+          EXE="$(find ./target ./flutter/build -type f \
+              -iname '*.exe' 2>/dev/null |
+              grep -Ev 'deps|build-script|cmake|example' |
+              head -1 || true)"
+
+          if [ -z "$EXE" ]; then
+            echo "EXE final nao encontrado."
+            exit 1
+          fi
+
+          cp "$EXE" \
+            "../suporte-magbel-${{ needs.resolve.outputs.version }}-windows-x64.exe"
+
+      - name: Upload Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: suporte-magbel-windows-x64
+          path: suporte-magbel-*-windows-x64.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux x64 AppImage
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Magbel
+        uses: actions/checkout@v4
+        with:
+          path: magbel
+
+      - name: Checkout RustDesk stable
+        uses: actions/checkout@v4
+        with:
+          repository: rustdesk/rustdesk
+          ref: refs/tags/${{ needs.resolve.outputs.version }}
+          submodules: recursive
+          path: rustdesk
+
+      - name: Dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake curl gcc g++ git \
+            libclang-dev libgtk-3-dev llvm-dev \
+            nasm ninja-build pkg-config wget \
+            libxdo-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libasound2-dev \
+            libpulse-dev libva-dev \
+            libvdpau-dev libunwind-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libpam0g-dev
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.24.5"
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Preparar branding e configuracao
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+
+          cp ../magbel/branding/icon.png ./res/icon.png
+
+          python3 ../magbel/.github/scripts/magbel_patch.py \
+            --root . \
+            --product "$PRODUCT_NAME" \
+            --company "$COMPANY_NAME" \
+            --server "$SERVER" \
+            --port "$SERVER_PORT" \
+            --key "$PUBLIC_KEY" \
+            --api "$API_SERVER" \
+            --website "$WEBSITE"
+
+      - name: Build Linux
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          python3 ./build.py --flutter
+
+      - name: Gerar AppImage
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+
+          # O RustDesk mantem o empacotamento Linux no proprio repositorio.
+          # Tentamos primeiro um AppImage produzido pelo build.
+          APPIMAGE="$(find . -type f -name '*.AppImage' | head -1 || true)"
+
+          if [ -z "$APPIMAGE" ]; then
+            echo "O build desta versao nao produziu AppImage diretamente."
+            echo "O job sera ajustado para o empacotador da tag se necessario."
+            exit 1
+          fi
+
+          cp "$APPIMAGE" \
+            "../suporte-magbel-${{ needs.resolve.outputs.version }}-linux-x64.AppImage"
+
+      - name: Upload Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: suporte-magbel-linux-x64
+          path: suporte-magbel-*-linux-x64.AppImage
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-apple-darwin
+            runner: macos-15-intel
+
+          - arch: arm64
+            target: aarch64-apple-darwin
+            runner: macos-14
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout Magbel
+        uses: actions/checkout@v4
+        with:
+          path: magbel
+
+      - name: Checkout RustDesk stable
+        uses: actions/checkout@v4
+        with:
+          repository: rustdesk/rustdesk
+          ref: refs/tags/${{ needs.resolve.outputs.version }}
+          submodules: recursive
+          path: rustdesk
+
+      - name: Dependencias
+        run: |
+          brew install imagemagick potrace nasm cmake ninja create-dmg
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.24.5"
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Preparar branding
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+
+          cp ../magbel/branding/icon.png ./res/icon.png
+
+          python3 ../magbel/.github/scripts/magbel_patch.py \
+            --root . \
+            --product "$PRODUCT_NAME" \
+            --company "$COMPANY_NAME" \
+            --server "$SERVER" \
+            --port "$SERVER_PORT" \
+            --key "$PUBLIC_KEY" \
+            --api "$API_SERVER" \
+            --website "$WEBSITE"
+
+          mkdir -p flutter/macos/Runner/Assets.xcassets/AppIcon.appiconset
+
+          for S in 16 32 64 128 256 512 1024; do
+            magick ./res/icon.png -resize "${S}x${S}" \
+              "flutter/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_${S}.png"
+          done
+
+      - name: Build macOS
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+
+          EXTRA=""
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            EXTRA="--screencapturekit"
+          fi
+
+          python3 ./build.py \
+            --flutter \
+            --hwcodec \
+            --unix-file-copy-paste \
+            $EXTRA
+
+      - name: Assinatura ad-hoc e DMG
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+
+          APP="$(find ./flutter/build/macos/Build/Products/Release \
+             -maxdepth 1 -type d -name '*.app' | head -1)"
+
+          test -n "$APP"
+
+          xattr -cr "$APP" || true
+          codesign --force --deep --sign - "$APP"
+
+          create-dmg \
+            --volname "$PRODUCT_NAME" \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --app-drop-link 600 185 \
+            "../suporte-magbel-${{ needs.resolve.outputs.version }}-macos-${{ matrix.arch }}.dmg" \
+            "$APP"
+
+      - name: Upload macOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: suporte-magbel-macos-${{ matrix.arch }}
+          path: suporte-magbel-*-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  release:
+    name: Publicar release
+    needs: [resolve, windows, linux, macos]
+    if: |
+      always() &&
+      needs.resolve.outputs.build == 'true' &&
+      needs.windows.result == 'success' &&
+      needs.linux.result == 'success' &&
+      needs.macos.result == 'success'
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar artefatos
+        uses: actions/download-artifact@v4
+        with:
+          pattern: suporte-magbel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Criar aliases stable e SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+
+          cp "suporte-magbel-${{ needs.resolve.outputs.version }}-windows-x64.exe" \
+             "suporte-magbel-stable.exe"
+
+          cp "suporte-magbel-${{ needs.resolve.outputs.version }}-linux-x64.AppImage" \
+             "suporte-magbel-stable.AppImage"
+
+          cp "suporte-magbel-${{ needs.resolve.outputs.version }}-macos-x64.dmg" \
+             "suporte-magbel-stable-macos-x64.dmg"
+
+          cp "suporte-magbel-${{ needs.resolve.outputs.version }}-macos-arm64.dmg" \
+             "suporte-magbel-stable-macos-arm64.dmg"
+
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Publicar GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ needs.resolve.outputs.tag }}"
+          VERSION="${{ needs.resolve.outputs.version }}"
+
+          gh release delete "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --yes 2>/dev/null || true
+
+          gh release create "$TAG" \
+            dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Suporte Magbel $VERSION" \
+            --notes "Suporte Magbel baseado no RustDesk stable $VERSION."
+ |
               sort -V |
               tail -1
             )"
