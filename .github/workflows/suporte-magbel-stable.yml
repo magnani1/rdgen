@@ -42,7 +42,7 @@ env:
 jobs:
   resolve:
     name: Detectar stable
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -64,8 +64,6 @@ jobs:
           set -euo pipefail
 
           if [ -n "${REQUESTED_VERSION:-}" ]; then
-            # Aceita tanto "1.5.0"/"v1.5.0" quanto textos vindos da UI,
-            # extraindo apenas o primeiro SemVer estavel encontrado.
             VERSION="$(
               printf '%s\n' "$REQUESTED_VERSION" |
               grep -Eo 'v?[0-9]+\.[0-9]+\.[0-9]+' |
