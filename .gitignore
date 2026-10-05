@@ -7,3 +7,4 @@ exe/
 temp_zips/
 *.bak-*
 __pycache__/
+.github/workflows/*.backup-*
