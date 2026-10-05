@@ -304,7 +304,7 @@ jobs:
             clang cmake curl gcc g++ git \
             libclang-dev libgtk-3-dev llvm-dev \
             nasm ninja-build pkg-config wget \
-            libxdo-dev libxcb-shape0-dev \
+            libxdo-dev libxcb-randr0-dev libxcb-shape0-dev \
             libxcb-xfixes0-dev libasound2-dev \
             libpulse-dev libva-dev \
             libvdpau-dev libunwind-dev \
