@@ -23,6 +23,43 @@ from urllib.parse import quote
 _UUID_RE = re.compile(r'^[0-9a-fA-F-]{36}$')
 _NAME_RE = re.compile(r'^[\w.-]+$')
 
+# MAGBEL_RDGEN_DEFAULTS
+def magbel_form_defaults():
+    """
+    Defaults configuráveis através de variáveis de ambiente.
+    Nenhum segredo precisa ficar gravado no código-fonte.
+    """
+    return {
+        'serverIP': os.getenv(
+            'DEFAULT_SERVER',
+            'rustdesk.magbel.com.br'
+        ),
+        'serverPort': os.getenv(
+            'DEFAULT_PORT',
+            '21116'
+        ),
+        'apiServer': os.getenv(
+            'DEFAULT_API_SERVER',
+            'https://suporte.magbel.com.br'
+        ),
+        'key': os.getenv(
+            'DEFAULT_KEY',
+            ''
+        ),
+        'exename': os.getenv(
+            'DEFAULT_EXENAME',
+            'MagbelRemote'
+        ),
+        'appname': os.getenv(
+            'DEFAULT_APPNAME',
+            'Magbel Remote'
+        ),
+        'compname': os.getenv(
+            'DEFAULT_COMPANY',
+            'Magbel'
+        ),
+    }
+
 def _safe_parts(uuid_val, filename):
     if not uuid_val or not _UUID_RE.match(uuid_val):
         return False
@@ -46,7 +83,7 @@ def generate_custom_client(params, full_url):
     user_secret = params.get('sh_secret_field', '')
     selfhosted = (_settings.SH_SECRET == user_secret)
     platform = params.get('platform', 'windows')
-    version = params.get('version', '1.4.9')
+    version = params.get('version', '1.5.0')
     delayFix = params.get('delayFix', True)
     xOffline = params.get('xOffline', False)
     hidecm = params.get('hidecm', False)
@@ -417,7 +454,7 @@ def generator_view(request):
             else:
                 return JsonResponse({"error": result['error']}, status=result.get('status_code', 500))
     else:
-        form = GenerateForm()
+        form = GenerateForm(initial=magbel_form_defaults())
     #return render(request, 'maintenance.html')
     return render(request, 'generator.html', {'form': form})
 

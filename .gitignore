@@ -2,3 +2,8 @@
 db.sqlite3
 gunicorn.conf
 .venv
+.backup-magbel/
+exe/
+temp_zips/
+*.bak-*
+__pycache__/
