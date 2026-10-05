@@ -187,7 +187,7 @@ jobs:
     name: Windows x64
     needs: [resolve, bridge]
     if: needs.resolve.outputs.build == 'true'
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout Magbel
@@ -209,23 +209,10 @@ jobs:
           name: bridge-artifact
           path: rustdesk
 
-      - name: Preparar branding e configuracao
-        shell: bash
-        working-directory: rustdesk
-        run: |
-          set -euo pipefail
-
-          cp ../magbel/branding/icon.png ./res/icon.png
-
-          python ../magbel/.github/scripts/magbel_patch.py \
-            --root . \
-            --product "$PRODUCT_NAME" \
-            --company "$COMPANY_NAME" \
-            --server "$SERVER" \
-            --port "$SERVER_PORT" \
-            --key "$PUBLIC_KEY" \
-            --api "$API_SERVER" \
-            --website "$WEBSITE"
+      - name: Instalar LLVM/Clang oficial
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "15.0.6"
 
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
@@ -233,36 +220,82 @@ jobs:
           channel: stable
           flutter-version: "3.24.5"
 
-      - name: Instalar Rust
+      - name: Preparar engine e patch Flutter do RustDesk
+        shell: powershell
+        working-directory: rustdesk
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          $flutterRoot = Split-Path -Parent (Split-Path -Parent (Get-Command flutter).Source)
+          $engineDest = Join-Path $flutterRoot "bin\cache\artifacts\engine\windows-x64-release"
+          New-Item -ItemType Directory -Force -Path $engineDest | Out-Null
+          Copy-Item -Recurse -Force windows-x64-release\* $engineDest
+
+      - name: Patch Flutter 3.24.5
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          FLUTTER_ROOT="$(dirname "$(dirname "$(which flutter)")")"
+          git -C "$FLUTTER_ROOT" apply "$GITHUB_WORKSPACE/rustdesk/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+
+      - name: Instalar Rust 1.75
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.75"
           targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - name: Preparar vcpkg Windows
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          doNotCache: false
+
+      - name: Instalar dependencias vcpkg Windows
+        shell: bash
+        working-directory: rustdesk
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        run: |
+          set -euo pipefail
+          "$VCPKG_ROOT/vcpkg" install             --triplet x64-windows-static             --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Preparar branding e configuracao
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          cp ../magbel/branding/icon.png ./res/icon.png
+          python ../magbel/.github/scripts/magbel_patch.py             --root .             --product "$PRODUCT_NAME"             --company "$COMPANY_NAME"             --server "$SERVER"             --port "$SERVER_PORT"             --key "$PUBLIC_KEY"             --api "$API_SERVER"             --website "$WEBSITE"
 
       - name: Build Windows x64
-        shell: bash
+        shell: powershell
         working-directory: rustdesk
         run: |
-          set -euo pipefail
-          python ./build.py --flutter
+          python .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Localizar EXE
-        shell: bash
+        shell: powershell
         working-directory: rustdesk
         run: |
-          set -euo pipefail
-
-          EXE="$(find ./target ./flutter/build -type f \
-              -iname '*.exe' 2>/dev/null |
-              grep -Ev 'deps|build-script|cmake|example' |
-              head -1 || true)"
-
-          if [ -z "$EXE" ]; then
-            echo "EXE final nao encontrado."
-            exit 1
-          fi
-
-          cp "$EXE" \
-            "../suporte-magbel-${{ needs.resolve.outputs.version }}-windows-x64.exe"
+          $candidates = @(
+            ".\flutter\build\windows\x64\runner\Release\rustdesk.exe",
+            ".\flutter\build\windows\x64\runner\Release\RustDesk.exe",
+            ".\target\release\rustdesk.exe"
+          )
+          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path .\flutter\build,.\target -Filter *.exe -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -notmatch 'deps|build-script|cmake|example' } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $exe) { throw "EXE final nao encontrado." }
+          Copy-Item $exe "..\suporte-magbel-${{ needs.resolve.outputs.version }}-windows-x64.exe"
 
       - name: Upload Windows
         uses: actions/upload-artifact@v4
@@ -275,7 +308,7 @@ jobs:
     name: Linux x64 AppImage
     needs: [resolve, bridge]
     if: needs.resolve.outputs.build == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout Magbel
@@ -297,22 +330,20 @@ jobs:
           name: bridge-artifact
           path: rustdesk
 
-      - name: Dependencias
+      - name: Dependencias Linux
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            clang cmake curl gcc g++ git \
-            libclang-dev libgtk-3-dev llvm-dev \
-            nasm ninja-build pkg-config wget \
-            libxdo-dev libxcb-randr0-dev libxcb-shape0-dev \
-            libxcb-xfixes0-dev libasound2-dev \
-            libpulse-dev libva-dev \
-            libvdpau-dev libunwind-dev \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libpam0g-dev
+          sudo apt-get install -y             build-essential clang cmake curl gcc g++ git             libayatana-appindicator3-dev libasound2-dev             libclang-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev             libgtk-3-dev libpulse-dev libva-dev             libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev             libxdo-dev libxfixes-dev llvm-dev nasm ninja-build             pkg-config python3 rpm unzip wget xz-utils libssl-dev             libarchive-tools libfuse2
+          sudo apt-get remove -y libopus-dev || true
 
-      - name: Preparar vcpkg do RustDesk
+      - name: Instalar Rust 1.75
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.75"
+          targets: x86_64-unknown-linux-gnu
+          components: rustfmt
+
+      - name: Preparar vcpkg Linux
         shell: bash
         working-directory: rustdesk
         run: |
@@ -322,8 +353,7 @@ jobs:
           git -C "$VCPKG_DIR" checkout 9e593bb18ea69cc5095e012465dcd675a822ed0d
           "$VCPKG_DIR/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$VCPKG_DIR" >> "$GITHUB_ENV"
-          sudo apt-get install -y libva-dev
-          "$VCPKG_DIR/vcpkg" install --triplet x64-linux --x-install-root="$VCPKG_DIR/installed"
+          "$VCPKG_DIR/vcpkg" install             --triplet x64-linux             --x-install-root="$VCPKG_DIR/installed"
 
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
@@ -331,54 +361,61 @@ jobs:
           channel: stable
           flutter-version: "3.24.5"
 
-      - name: Instalar Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-gnu
+      - name: Patch Flutter 3.24.5
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          FLUTTER_ROOT="$(dirname "$(dirname "$(which flutter)")")"
+          git -C "$FLUTTER_ROOT" apply "$GITHUB_WORKSPACE/rustdesk/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
 
       - name: Preparar branding e configuracao
         shell: bash
         working-directory: rustdesk
         run: |
           set -euo pipefail
-
           cp ../magbel/branding/icon.png ./res/icon.png
+          python3 ../magbel/.github/scripts/magbel_patch.py             --root .             --product "$PRODUCT_NAME"             --company "$COMPANY_NAME"             --server "$SERVER"             --port "$SERVER_PORT"             --key "$PUBLIC_KEY"             --api "$API_SERVER"             --website "$WEBSITE"
 
-          python3 ../magbel/.github/scripts/magbel_patch.py \
-            --root . \
-            --product "$PRODUCT_NAME" \
-            --company "$COMPANY_NAME" \
-            --server "$SERVER" \
-            --port "$SERVER_PORT" \
-            --key "$PUBLIC_KEY" \
-            --api "$API_SERVER" \
-            --website "$WEBSITE"
-
-      - name: Build Linux
+      - name: Build Rust Linux
         shell: bash
         working-directory: rustdesk
         run: |
           set -euo pipefail
-          python3 ./build.py --flutter
+          sed -i 's/\["cdylib", "staticlib", "rlib"\]/["cdylib"]/g' Cargo.toml
+          cargo build --locked --lib             --features hwcodec,flutter,unix-file-copy-paste             --release
 
-      - name: Gerar AppImage
+      - name: Gerar pacote DEB base
         shell: bash
         working-directory: rustdesk
         run: |
           set -euo pipefail
-
-          # O RustDesk mantem o empacotamento Linux no proprio repositorio.
-          # Tentamos primeiro um AppImage produzido pelo build.
-          APPIMAGE="$(find . -type f -name '*.AppImage' | head -1 || true)"
-
-          if [ -z "$APPIMAGE" ]; then
-            echo "O build desta versao nao produziu AppImage diretamente."
-            echo "O job sera ajustado para o empacotador da tag se necessario."
+          python3 ./build.py --flutter --skip-cargo
+          DEB="$(find . -maxdepth 2 -type f -name 'rustdesk*.deb' | head -1 || true)"
+          if [ -z "$DEB" ]; then
+            echo "Pacote DEB nao foi produzido."
             exit 1
           fi
+          cp "$DEB" ./appimage/rustdesk.deb
 
-          cp "$APPIMAGE" \
-            "../suporte-magbel-${{ needs.resolve.outputs.version }}-linux-x64.AppImage"
+      - name: Gerar AppImage oficial
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user "setuptools_scm<10"
+          python3 -m pip install --user git+https://github.com/rustdesk-org/appimage-builder.git
+          export PATH="$HOME/.local/bin:$PATH"
+          pushd appimage
+          ./build-apprun.sh x86_64
+          sudo -E env "PATH=$PATH" appimage-builder --skip-tests --recipe ./AppImageBuilder-x86_64.yml
+          popd
+          APPIMAGE="$(find ./appimage -type f -name 'rustdesk-*.AppImage' | head -1 || true)"
+          if [ -z "$APPIMAGE" ]; then
+            echo "AppImage final nao encontrado."
+            exit 1
+          fi
+          cp "$APPIMAGE" "../suporte-magbel-${{ needs.resolve.outputs.version }}-linux-x64.AppImage"
 
       - name: Upload Linux
         uses: actions/upload-artifact@v4
@@ -399,10 +436,13 @@ jobs:
           - arch: x64
             target: x86_64-apple-darwin
             runner: macos-15-intel
-
+            vcpkg_triplet: x64-osx
+            extra: ""
           - arch: arm64
             target: aarch64-apple-darwin
             runner: macos-14
+            vcpkg_triplet: arm64-osx
+            extra: "--screencapturekit"
 
     runs-on: ${{ matrix.runner }}
 
@@ -426,9 +466,19 @@ jobs:
           name: bridge-artifact
           path: rustdesk
 
-      - name: Dependencias
+      - name: Dependencias macOS
+        shell: bash
         run: |
-          brew install imagemagick potrace nasm cmake ninja create-dmg
+          set -euo pipefail
+          brew install llvm create-dmg imagemagick
+          if ! command -v pkg-config >/dev/null 2>&1; then
+            brew install pkg-config
+          fi
+          cd /tmp
+          curl -L -o nasm.zip https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/macosx/nasm-2.16.03-macosx.zip
+          unzip -q nasm.zip
+          sudo cp nasm-2.16.03/nasm /usr/local/bin/nasm
+          nasm --version
 
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
@@ -436,74 +486,77 @@ jobs:
           channel: stable
           flutter-version: "3.24.5"
 
-      - name: Instalar Rust
+      - name: Patch e workaround Flutter
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          FLUTTER_ROOT="$(dirname "$(dirname "$(which flutter)")")"
+          git -C "$FLUTTER_ROOT" apply "$GITHUB_WORKSPACE/rustdesk/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+          sed -i -e 's/_setFramesEnabledState(false);/\/\/_setFramesEnabledState(false);/g'             "$FLUTTER_ROOT/packages/flutter/lib/src/scheduler/binding.dart"
+
+      - name: Instalar Rust 1.81
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.81"
           targets: ${{ matrix.target }}
+          components: rustfmt
+
+      - name: Preparar vcpkg macOS
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          doNotCache: false
+
+      - name: Instalar dependencias vcpkg macOS
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          "$VCPKG_ROOT/vcpkg" install             --triplet "${{ matrix.vcpkg_triplet }}"             --x-install-root="$VCPKG_ROOT/installed"
 
       - name: Preparar branding
         shell: bash
         working-directory: rustdesk
         run: |
           set -euo pipefail
-
           cp ../magbel/branding/icon.png ./res/icon.png
-
-          python3 ../magbel/.github/scripts/magbel_patch.py \
-            --root . \
-            --product "$PRODUCT_NAME" \
-            --company "$COMPANY_NAME" \
-            --server "$SERVER" \
-            --port "$SERVER_PORT" \
-            --key "$PUBLIC_KEY" \
-            --api "$API_SERVER" \
-            --website "$WEBSITE"
+          python3 ../magbel/.github/scripts/magbel_patch.py             --root .             --product "$PRODUCT_NAME"             --company "$COMPANY_NAME"             --server "$SERVER"             --port "$SERVER_PORT"             --key "$PUBLIC_KEY"             --api "$API_SERVER"             --website "$WEBSITE"
 
           mkdir -p flutter/macos/Runner/Assets.xcassets/AppIcon.appiconset
-
           for S in 16 32 64 128 256 512 1024; do
-            magick ./res/icon.png -resize "${S}x${S}" \
-              "flutter/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_${S}.png"
+            magick ./res/icon.png -resize "${S}x${S}"               "flutter/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_${S}.png"
           done
+
+      - name: Ajustar minimo macOS ARM64
+        if: matrix.arch == 'arm64'
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          MIN_MACOS_VERSION="12.3"
+          sed -i -e "s/MACOSX_DEPLOYMENT_TARGET=[0-9]*.[0-9]*/MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}/" build.py
+          sed -i -e "s/platform :osx, '.*'/platform :osx, '${MIN_MACOS_VERSION}'/" flutter/macos/Podfile
+          sed -i -e "s/osx_minimum_system_version = \"[0-9]*.[0-9]*\"/osx_minimum_system_version = \"${MIN_MACOS_VERSION}\"/" Cargo.toml
+          sed -i -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
 
       - name: Build macOS
         shell: bash
         working-directory: rustdesk
         run: |
           set -euo pipefail
-
-          EXTRA=""
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            EXTRA="--screencapturekit"
-          fi
-
-          python3 ./build.py \
-            --flutter \
-            --hwcodec \
-            --unix-file-copy-paste \
-            $EXTRA
+          python3 ./build.py             --flutter             --hwcodec             --unix-file-copy-paste             ${{ matrix.extra }}
 
       - name: Assinatura ad-hoc e DMG
         shell: bash
         working-directory: rustdesk
         run: |
           set -euo pipefail
-
-          APP="$(find ./flutter/build/macos/Build/Products/Release \
-             -maxdepth 1 -type d -name '*.app' | head -1)"
-
+          APP="$(find ./flutter/build/macos/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)"
           test -n "$APP"
-
           xattr -cr "$APP" || true
           codesign --force --deep --sign - "$APP"
-
-          create-dmg \
-            --volname "$PRODUCT_NAME" \
-            --window-size 800 400 \
-            --icon-size 100 \
-            --app-drop-link 600 185 \
-            "../suporte-magbel-${{ needs.resolve.outputs.version }}-macos-${{ matrix.arch }}.dmg" \
-            "$APP"
+          create-dmg             --volname "$PRODUCT_NAME"             --window-size 800 400             --icon-size 100             --app-drop-link 600 185             "../suporte-magbel-${{ needs.resolve.outputs.version }}-macos-${{ matrix.arch }}.dmg"             "$APP"
 
       - name: Upload macOS
         uses: actions/upload-artifact@v4
