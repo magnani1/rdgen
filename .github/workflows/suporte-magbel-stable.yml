@@ -269,7 +269,6 @@ jobs:
         working-directory: rustdesk
         run: |
           set -euo pipefail
-          cp ../magbel/branding/icon.png ./res/icon.png
           python ../magbel/.github/scripts/magbel_patch.py             --root .             --product "$PRODUCT_NAME"             --company "$COMPANY_NAME"             --server "$SERVER"             --port "$SERVER_PORT"             --key "$PUBLIC_KEY"             --api "$API_SERVER"             --website "$WEBSITE"
 
       - name: Build Windows x64
@@ -277,6 +276,16 @@ jobs:
         working-directory: rustdesk
         run: |
           python .\build.py --portable --flutter --hwcodec --vram
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verificar pacote Windows Magbel
+        shell: powershell
+        working-directory: rustdesk
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = @(Get-ChildItem -Path . -Filter "rustdesk-*-install.exe" -File)
+          if ($package.Count -ne 1) { throw "Pacote portatil nao encontrado." }
+          python ../magbel/.github/scripts/verify_magbel_bundle.py --platform windows --bundle flutter/build/windows/x64/runner/Release --portable-data libs/portable/data.bin --portable-exe $package[0].FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Localizar EXE
@@ -392,7 +401,6 @@ jobs:
         working-directory: rustdesk
         run: |
           set -euo pipefail
-          cp ../magbel/branding/icon.png ./res/icon.png
           python3 ../magbel/.github/scripts/magbel_patch.py             --root .             --product "$PRODUCT_NAME"             --company "$COMPANY_NAME"             --server "$SERVER"             --port "$SERVER_PORT"             --key "$PUBLIC_KEY"             --api "$API_SERVER"             --website "$WEBSITE"
 
       - name: Build Rust Linux
@@ -402,6 +410,14 @@ jobs:
           set -euo pipefail
           sed -i 's/\["cdylib", "staticlib", "rlib"\]/["cdylib"]/g' Cargo.toml
           cargo build --locked --lib             --features hwcodec,flutter,unix-file-copy-paste             --release
+
+      - name: Testar defaults de conexao Magbel
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path libs/hbb_common/Cargo.toml --lib --release --features webrtc magbel_connection_defaults | tee "$RUNNER_TEMP/magbel-settings-test.log"
+          grep -F "config::magbel_connection_tests::magbel_connection_defaults ... ok" "$RUNNER_TEMP/magbel-settings-test.log"
 
       - name: Gerar pacote DEB base
         shell: bash
@@ -433,12 +449,23 @@ jobs:
           ./build-apprun.sh x86_64
           sudo -E env "PATH=$PATH" appimage-builder --skip-tests --recipe ./AppImageBuilder-x86_64.yml
           popd
-          APPIMAGE="$(find ./appimage -type f -name 'rustdesk-*.AppImage' | head -1 || true)"
+          APPIMAGE="$(find ./appimage -maxdepth 1 -type f -name '*.AppImage' | head -1 || true)"
           if [ -z "$APPIMAGE" ]; then
             echo "AppImage final nao encontrado."
             exit 1
           fi
           cp "$APPIMAGE" "../suporte-magbel-${{ needs.resolve.outputs.version }}-linux-x64.AppImage"
+
+      - name: Verificar AppImage Magbel
+        shell: bash
+        run: |
+          set -euo pipefail
+          APPIMAGE="$GITHUB_WORKSPACE/suporte-magbel-${{ needs.resolve.outputs.version }}-linux-x64.AppImage"
+          mkdir -p "$RUNNER_TEMP/magbel-appimage-check"
+          cd "$RUNNER_TEMP/magbel-appimage-check"
+          chmod +x "$APPIMAGE"
+          "$APPIMAGE" --appimage-extract >/dev/null
+          python3 "$GITHUB_WORKSPACE/magbel/.github/scripts/verify_magbel_bundle.py" --platform linux --bundle squashfs-root
 
       - name: Upload Linux
         uses: actions/upload-artifact@v4
@@ -556,13 +583,8 @@ jobs:
         working-directory: rustdesk
         run: |
           set -euo pipefail
-          cp ../magbel/branding/icon.png ./res/icon.png
           python3 ../magbel/.github/scripts/magbel_patch.py             --root .             --product "$PRODUCT_NAME"             --company "$COMPANY_NAME"             --server "$SERVER"             --port "$SERVER_PORT"             --key "$PUBLIC_KEY"             --api "$API_SERVER"             --website "$WEBSITE"
 
-          mkdir -p flutter/macos/Runner/Assets.xcassets/AppIcon.appiconset
-          for S in 16 32 64 128 256 512 1024; do
-            magick ./res/icon.png -resize "${S}x${S}"               "flutter/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_${S}.png"
-          done
 
       - name: Ajustar minimo macOS ARM64
         if: matrix.arch == 'arm64'
@@ -590,8 +612,12 @@ jobs:
           set -euo pipefail
           APP="$(find ./flutter/build/macos/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)"
           test -n "$APP"
+          BRANDED_APP="$(dirname "$APP")/$PRODUCT_NAME.app"
+          mv "$APP" "$BRANDED_APP"
+          APP="$BRANDED_APP"
           xattr -cr "$APP" || true
           codesign --force --deep --sign - "$APP"
+          python3 ../magbel/.github/scripts/verify_magbel_bundle.py --platform macos --bundle "$APP"
           create-dmg             --volname "$PRODUCT_NAME"             --window-size 800 400             --icon-size 100             --app-drop-link 600 185             "../suporte-magbel-${{ needs.resolve.outputs.version }}-macos-${{ matrix.arch }}.dmg"             "$APP"
 
       - name: Upload macOS
@@ -651,12 +677,13 @@ jobs:
           TAG="${{ needs.resolve.outputs.tag }}"
           VERSION="${{ needs.resolve.outputs.version }}"
 
-          gh release delete "$TAG" \
+          gh release delete "$TAG" --cleanup-tag \
             --repo "$GITHUB_REPOSITORY" \
             --yes 2>/dev/null || true
 
           gh release create "$TAG" \
             dist/* \
             --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
             --title "Suporte Magbel $VERSION" \
             --notes "Suporte Magbel baseado no RustDesk stable $VERSION."

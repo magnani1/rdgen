@@ -1,0 +1,17 @@
+{
+  "compiled/128x128.png": "6971bf3d33ec7cfed94342b662fd273a4f3a83ddc9870034eb31b2d81f87480d",
+  "compiled/256x256.png": "28fca99a5b483a3d92441cd16f29951fc17b5ae84e22fa093e76b49fa85d1789",
+  "compiled/32x32.png": "999f3b4e58ae79772a54170f936e0006aeb8260b2ecff686cb916bd5ce3ef237",
+  "compiled/64x64.png": "248a062b71dc8f75161d9b5cfbd15a49666acec8d4a1640bfa7130092c87574b",
+  "compiled/AppIcon.icns": "53fcd717cad6bd8d84490535d799c2418d1d9bef232c0a1adf32bfd109438e44",
+  "compiled/icon.ico": "db9bd4c7b4164424d421f039859b3c521186513aa0f737c4765472ca37501b7a",
+  "compiled/icon.svg": "dcb62372e25c21d69a0c2342e94aa52a61e58ac155b0f1a38bb0b92335af9bc1",
+  "compiled/logo-dark.png": "7091547fbbb94b3c688eefeb47e1ced87d93e59f7d6a358da2aea802ac92621b",
+  "compiled/logo-light.png": "e55b300ad28373ed830dd66ea09ad9dd153077af882a0f6600028f9f6ec00371",
+  "compiled/mac-tray-dark-x2.png": "8971aee458157e52b1282056b57371b788ac79739e3fff997cb87ae1391b6028",
+  "compiled/tray-icon.ico": "70fd1bd9dd4254f84e839cc55502bc50877bb1858fd8fc7b086baae063642ae3",
+  "icon.png": "b174708636af38d566d1d08802eaf2dbce604682d29ce106d2d1c21a0539edef",
+  "logo-dark.svg": "bb18339c18fcc25cd06ab118d51a58a4a0db0e936e5ba7e6afb5057611a3608e",
+  "logo-light.svg": "3d17ec9d8d9c2356becbc069b3a25a5f4a4fcd9864d55d82c8ec84d2959ee69b",
+  "logo.png": "62d48890faa25a3f4a9cc854aa8bcdb4c5e6d13fbdfe4b36fffabe49e3c347af"
+}
