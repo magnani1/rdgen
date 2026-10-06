@@ -68,7 +68,41 @@ replace('src/common.rs', r'"https://admin\.rustdesk\.com"\.to_owned\(\)', litera
 # The filter in the Linux job runs this regression test on a fresh runner profile.
 f = root / config
 test_assertions = '\n'.join(f'        assert_eq!(super::Config::get_option({literal(k)}), {literal(v)});' for k, v in settings.items())
-f.write_text(f.read_text() + '\n#[cfg(test)]\nmod magbel_connection_tests {\n    #[test]\n    fn magbel_connection_defaults() {\n' + test_assertions + '\n        assert!(!super::Config::no_register_device());\n    }\n}\n')
+f.write_text(f.read_text(encoding='utf-8') + '\n#[cfg(test)]\nmod magbel_connection_tests {\n    #[test]\n    fn magbel_connection_defaults() {\n' + test_assertions + '\n        assert!(!super::Config::no_register_device());\n    }\n}\n', encoding='utf-8')
+
+# Query the production getters from the final native library in CI. Searching
+# raw binary strings is unreliable: LLVM can replace short strings with stores.
+ffi = root / 'src/lib.rs'
+ffi.write_text(ffi.read_text(encoding='utf-8') + r'''
+
+/// Report public connection settings without starting the client or registering a device.
+#[no_mangle]
+pub extern "C" fn magbel_get_config_json() -> *mut std::os::raw::c_char {
+    use hbb_common::{config::Config, serde_json};
+    let mut settings = std::collections::HashMap::new();
+    for key in ["custom-rendezvous-server", "relay-server", "key", "api-server"] {
+        settings.insert(key, Config::get_option(key));
+    }
+    let data = serde_json::json!({
+        "product": crate::common::get_app_name(),
+        "settings": settings,
+        "effective_api": crate::common::get_api_server(
+            Config::get_option("api-server"),
+            Config::get_option("custom-rendezvous-server")
+        ),
+        "register_device": !Config::no_register_device()
+    });
+    std::ffi::CString::new(data.to_string()).unwrap().into_raw()
+}
+
+/// Release only a pointer returned by magbel_get_config_json.
+#[no_mangle]
+pub unsafe extern "C" fn magbel_free_config_json(ptr: *mut std::os::raw::c_char) {
+    if !ptr.is_null() {
+        drop(std::ffi::CString::from_raw(ptr));
+    }
+}
+''', encoding='utf-8')
 
 
 for path in ('Cargo.toml', 'libs/portable/Cargo.toml', 'flutter/windows/runner/Runner.rc',

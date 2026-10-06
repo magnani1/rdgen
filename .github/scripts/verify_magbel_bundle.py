@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify branding and configuration in the actual bundle/portable payload."""
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -44,9 +45,28 @@ for name, source in {'icon.png':'icon.png', 'logo.png':'logo.png',
     check(hashlib.sha256((assets / name).read_bytes()).hexdigest() == exports[source], f'Branding antigo/ausente no pacote: {name}')
 
 library_patterns = {'windows':'librustdesk.dll', 'linux':'librustdesk.so', 'macos':'*rustdesk.dylib'}
-library = one(library_patterns[a.platform]).read_bytes()
-for value in (product, *expected.values()):
-    check(value.encode() in library, f'Valor de conexao/branding ausente na biblioteca compilada: {value}')
+library = one(library_patterns[a.platform]).resolve()
+dll_directory = os.add_dll_directory(str(library.parent)) if os.name == 'nt' else None
+try:
+    native_library = ctypes.CDLL(str(library))
+    native_library.magbel_get_config_json.restype = ctypes.c_void_p
+    native_library.magbel_get_config_json.argtypes = []
+    native_library.magbel_free_config_json.argtypes = [ctypes.c_void_p]
+    native_library.magbel_free_config_json.restype = None
+    pointer = native_library.magbel_get_config_json()
+    check(pointer, 'A biblioteca nao retornou a configuracao')
+    try:
+        runtime = json.loads(ctypes.string_at(pointer).decode('utf-8'))
+    finally:
+        native_library.magbel_free_config_json(pointer)
+finally:
+    if dll_directory is not None:
+        dll_directory.close()
+check(runtime['product'] == product, 'Nome incorreto na biblioteca compilada')
+check(runtime['settings'] == expected, 'Conexao incorreta na biblioteca compilada')
+check(runtime['effective_api'] == expected['api-server'], 'Resolvedor da API aponta para outro servidor')
+check(runtime['register_device'], 'Registro de dispositivos desabilitado')
+print('Configuracao consultada na biblioteca compilada:', json.dumps(runtime, sort_keys=True))
 
 ico = (branding / 'compiled/icon.ico').read_bytes()
 count = struct.unpack_from('<H', ico, 4)[0]
