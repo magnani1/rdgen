@@ -136,9 +136,47 @@ jobs:
           python3 "$RUNNER_TEMP/magbel-windows-checkout/.github/scripts/magbel_patch.py" --root rustdesk --product "$PRODUCT_NAME" --company "$COMPANY_NAME" --server "$SERVER" --port "$SERVER_PORT" --key "$PUBLIC_KEY" --api "$API_SERVER" --website "$WEBSITE"
           python3 magbel/.github/scripts/verify_magbel_source.py --root rustdesk
 
+  preflight_windows:
+    name: Validar gerador portatil no Windows
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout RustDesk oficial stable
+        uses: actions/checkout@v4
+        with:
+          repository: rustdesk/rustdesk
+          ref: refs/tags/${{ needs.resolve.outputs.version }}
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Testar caminho inicial no formato oficial
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install -r libs/portable/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $fixture = Join-Path $env:RUNNER_TEMP "magbel portable smoke/Release"
+          New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+          $bundle = (Resolve-Path $fixture).Path
+          [IO.File]::WriteAllBytes((Join-Path $bundle "$env:PRODUCT_NAME.exe"), [byte[]](77,90,0,1))
+          $payload = Join-Path $env:RUNNER_TEMP "magbel-portable-smoke.bin"
+          python libs/portable/generate.py -f $bundle -o libs/portable -e (Join-Path $bundle "$env:PRODUCT_NAME.exe") --package $payload
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @'
+          from pathlib import Path
+          import sys
+          trailer = Path(sys.argv[1]).read_bytes().rsplit(b'rustdesk', 1)[1]
+          executable = trailer.decode().replace(chr(92), '/').removeprefix('./')
+          assert executable == sys.argv[2] + '.exe', executable
+          print('OK: gerador oficial inicia o EXE personalizado na raiz do pacote.')
+          '@ | python - $payload $env:PRODUCT_NAME
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   bridge:
     name: Gerar Flutter Rust Bridge
-    needs: [resolve, preflight]
+    needs: [resolve, preflight, preflight_windows]
     if: needs.resolve.outputs.build == 'true'
     runs-on: ubuntu-22.04
 
@@ -318,7 +356,7 @@ jobs:
         working-directory: rustdesk
         run: |
           $ErrorActionPreference = "Stop"
-          $bundle = "flutter/build/windows/x64/runner/Release"
+          $bundle = (Resolve-Path "flutter/build/windows/x64/runner/Release").Path
           Rename-Item -Path (Join-Path $bundle "rustdesk.exe") -NewName "$env:PRODUCT_NAME.exe"
           python -m pip install -r libs/portable/requirements.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
