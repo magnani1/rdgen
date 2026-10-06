@@ -276,26 +276,19 @@ jobs:
         shell: powershell
         working-directory: rustdesk
         run: |
-          python .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          python .\build.py --portable --flutter --hwcodec --vram
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Localizar EXE
         shell: powershell
         working-directory: rustdesk
         run: |
-          $candidates = @(
-            ".\flutter\build\windows\x64\runner\Release\rustdesk.exe",
-            ".\flutter\build\windows\x64\runner\Release\RustDesk.exe",
-            ".\target\release\rustdesk.exe"
-          )
-          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $exe) {
-            $exe = Get-ChildItem -Path .\flutter\build,.\target -Filter *.exe -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -notmatch 'deps|build-script|cmake|example' } |
-              Select-Object -First 1 -ExpandProperty FullName
+          $ErrorActionPreference = "Stop"
+          $packages = @(Get-ChildItem -Path . -Filter "rustdesk-*-install.exe" -File)
+          if ($packages.Count -ne 1) {
+            throw "Esperado um pacote portatil completo; encontrados $($packages.Count)."
           }
-          if (-not $exe) { throw "EXE final nao encontrado." }
-          Copy-Item $exe "..\suporte-magbel-${{ needs.resolve.outputs.version }}-windows-x64.exe"
+          Copy-Item $packages[0].FullName "..\suporte-magbel-${{ needs.resolve.outputs.version }}-windows-x64.exe"
 
       - name: Upload Windows
         uses: actions/upload-artifact@v4
@@ -526,11 +519,24 @@ jobs:
           sed -i -e 's/_setFramesEnabledState(false);/\/\/_setFramesEnabledState(false);/g'             "$FLUTTER_ROOT/packages/flutter/lib/src/scheduler/binding.dart"
 
       - name: Instalar Rust 1.81
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.81"
-          targets: ${{ matrix.target }}
-          components: rustfmt
+        shell: bash
+        env:
+          RUST_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          for ATTEMPT in 1 2 3; do
+            if rustup toolchain install 1.81.0 --profile minimal \
+                --target "$RUST_TARGET" --component rustfmt --no-self-update; then
+              rustup default 1.81.0
+              rustc --version
+              break
+            fi
+            if [ "$ATTEMPT" -eq 3 ]; then
+              echo "Nao foi possivel instalar Rust apos tres tentativas."
+              exit 1
+            fi
+            sleep 15
+          done
 
       - name: Preparar vcpkg macOS
         uses: lukka/run-vcpkg@v11
