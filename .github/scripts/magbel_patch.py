@@ -27,7 +27,7 @@ if api.scheme not in ('http', 'https') or not api.netloc or api.path not in ('',
     p.error('API deve ser a URL base do painel, sem /devices nem /api.')
 a.api = a.api.rstrip('/')
 
-manifest = json.loads((branding / 'compiled/manifest.json').read_text())
+manifest = json.loads((branding / 'compiled/manifest.json').read_text(encoding='utf-8'))
 for path, expected in manifest.items():
     if hashlib.sha256((branding / path).read_bytes()).hexdigest() != expected:
         raise RuntimeError(f'Branding alterado ou exportacao desatualizada: {path}')
@@ -65,58 +65,26 @@ replace(config, r'pub static ref DEFAULT_SETTINGS: RwLock<HashMap<String, String
 replace('src/common.rs', r'"https://admin\.rustdesk\.com"\.to_owned\(\)', literal(a.api) + '.to_owned()')
 
 # Exercise the production Config getters, rather than only matching source strings.
-# The filter in the Linux job runs this regression test on a fresh runner profile.
+# Each native job runs this regression test on a fresh runner profile.
 f = root / config
-test_assertions = '\n'.join(f'        assert_eq!(super::Config::get_option({literal(k)}), {literal(v)});' for k, v in settings.items())
+test_assertions = f'        assert_eq!(*super::APP_NAME.read().unwrap(), {literal(a.product)});\n' + '\n'.join(f'        assert_eq!(super::Config::get_option({literal(k)}), {literal(v)});' for k, v in settings.items())
 f.write_text(f.read_text(encoding='utf-8') + '\n#[cfg(test)]\nmod magbel_connection_tests {\n    #[test]\n    fn magbel_connection_defaults() {\n' + test_assertions + '\n        assert!(!super::Config::no_register_device());\n    }\n}\n', encoding='utf-8')
-
-# Query the production getters from the final native library in CI. Searching
-# raw binary strings is unreliable: LLVM can replace short strings with stores.
-ffi = root / 'src/lib.rs'
-ffi.write_text(ffi.read_text(encoding='utf-8') + r'''
-
-/// Report public connection settings without starting the client or registering a device.
-#[no_mangle]
-pub extern "C" fn magbel_get_config_json() -> *mut std::os::raw::c_char {
-    use hbb_common::{config::Config, serde_json};
-    let mut settings = std::collections::HashMap::new();
-    for key in ["custom-rendezvous-server", "relay-server", "key", "api-server"] {
-        settings.insert(key, Config::get_option(key));
-    }
-    let data = serde_json::json!({
-        "product": crate::common::get_app_name(),
-        "settings": settings,
-        "effective_api": crate::common::get_api_server(
-            Config::get_option("api-server"),
-            Config::get_option("custom-rendezvous-server")
-        ),
-        "register_device": !Config::no_register_device()
-    });
-    std::ffi::CString::new(data.to_string()).unwrap().into_raw()
-}
-
-/// Release only a pointer returned by magbel_get_config_json.
-#[no_mangle]
-pub unsafe extern "C" fn magbel_free_config_json(ptr: *mut std::os::raw::c_char) {
-    if !ptr.is_null() {
-        drop(std::ffi::CString::from_raw(ptr));
-    }
-}
-''', encoding='utf-8')
-
 
 for path in ('Cargo.toml', 'libs/portable/Cargo.toml', 'flutter/windows/runner/Runner.rc',
              'flutter/macos/Runner/Configs/AppInfo.xcconfig', 'flutter/lib/desktop/pages/desktop_setting_page.dart'):
     f = root / path
     text = f.read_text(encoding='utf-8')
     text = text.replace('Purslane Tech Pte. Ltd.', a.company).replace('Purslane Ltd.', a.company)
+    if path == 'Cargo.toml':
+        text = text.replace('"RustDesk Remote Desktop"', literal(a.product))
+        text = text.replace('ProductName = "RustDesk"', 'ProductName = ' + literal(a.product))
     if path in ('libs/portable/Cargo.toml', 'flutter/windows/runner/Runner.rc'):
         text = text.replace('"RustDesk Remote Desktop"', literal(a.product)).replace('"RustDesk"', literal(a.product))
     f.write_text(text, encoding='utf-8')
 replace('res/rustdesk.desktop', r'(?m)^Name=RustDesk$', 'Name=' + a.product)
 replace('appimage/AppImageBuilder-x86_64.yml', r'(?m)^    name: rustdesk$', '    name: ' + literal(a.product))
 menu = root / 'flutter/macos/Runner/Base.lproj/MainMenu.xib'
-menu.write_text(menu.read_text().replace('RustDesk', a.product))
+menu.write_text(menu.read_text(encoding='utf-8').replace('RustDesk', a.product), encoding='utf-8')
 plist = root / 'flutter/macos/Runner/Info.plist'
 data = plistlib.loads(plist.read_bytes())
 data['CFBundleName'] = a.product
@@ -149,6 +117,6 @@ for target, source in resources.items():
 build_manifest = {'product': a.product, 'company': a.company, 'settings': settings,
                   'build_commit': os.environ.get('GITHUB_SHA', ''),
                   'resources': {target: manifest[source] for target, source in resources.items()}}
-(root / 'flutter/assets/magbel-build.json').write_text(json.dumps(build_manifest, indent=2) + '\n')
+(root / 'flutter/assets/magbel-build.json').write_text(json.dumps(build_manifest, indent=2) + '\n', encoding='utf-8')
 print(f'Magbel: {a.product}; ID={settings["custom-rendezvous-server"]}; relay={settings["relay-server"]}; API={a.api}')
 print(f'Aplicados e verificados {len(resources)} recursos de branding e quatro defaults de conexao.')

@@ -111,9 +111,34 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "build=$BUILD" >> "$GITHUB_OUTPUT"
 
+  preflight:
+    name: Validar personalizacao antes dos builds
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Magbel
+        uses: actions/checkout@v4
+        with:
+          path: magbel
+      - name: Checkout RustDesk oficial stable
+        uses: actions/checkout@v4
+        with:
+          repository: rustdesk/rustdesk
+          ref: refs/tags/${{ needs.resolve.outputs.version }}
+          submodules: recursive
+          path: rustdesk
+      - name: Validar patch, consumidores dos recursos e checkout Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -c core.autocrlf=true clone --quiet --no-local magbel "$RUNNER_TEMP/magbel-windows-checkout"
+          python3 "$RUNNER_TEMP/magbel-windows-checkout/.github/scripts/magbel_patch.py" --root rustdesk --product "$PRODUCT_NAME" --company "$COMPANY_NAME" --server "$SERVER" --port "$SERVER_PORT" --key "$PUBLIC_KEY" --api "$API_SERVER" --website "$WEBSITE"
+          python3 magbel/.github/scripts/verify_magbel_source.py --root rustdesk
+
   bridge:
     name: Gerar Flutter Rust Bridge
-    needs: resolve
+    needs: [resolve, preflight]
     if: needs.resolve.outputs.build == 'true'
     runs-on: ubuntu-22.04
 
@@ -275,8 +300,31 @@ jobs:
         shell: powershell
         working-directory: rustdesk
         run: |
-          python .\build.py --portable --flutter --hwcodec --vram
+          python .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Testar defaults de conexao Magbel
+        shell: powershell
+        working-directory: rustdesk
+        run: |
+          $ErrorActionPreference = "Stop"
+          $log = Join-Path $env:RUNNER_TEMP "magbel-settings-test.log"
+          cargo test --locked --manifest-path libs/hbb_common/Cargo.toml --lib --release --features webrtc magbel_connection_defaults | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path $log -SimpleMatch "config::magbel_connection_tests::magbel_connection_defaults ... ok" -Quiet)) { throw "Teste Magbel nao executado." }
+
+      - name: Empacotar cliente Windows personalizado
+        shell: powershell
+        working-directory: rustdesk
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = "flutter/build/windows/x64/runner/Release"
+          Rename-Item -Path (Join-Path $bundle "rustdesk.exe") -NewName "$env:PRODUCT_NAME.exe"
+          python -m pip install -r libs/portable/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python libs/portable/generate.py -f $bundle -o libs/portable -e (Join-Path $bundle "$env:PRODUCT_NAME.exe")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item target/release/rustdesk-portable-packer.exe "rustdesk-${{ needs.resolve.outputs.version }}-install.exe"
 
       - name: Verificar pacote Windows Magbel
         shell: powershell
@@ -448,6 +496,7 @@ jobs:
           pushd appimage
           ./build-apprun.sh x86_64
           sudo -E env "PATH=$PATH" appimage-builder --skip-tests --recipe ./AppImageBuilder-x86_64.yml
+          cmp AppDir/AppRun appimage-build/AppRun/v2.0.0/AppRun-Release-x86_64
           popd
           APPIMAGE="$(find ./appimage -maxdepth 1 -type f -name '*.AppImage' | head -1 || true)"
           if [ -z "$APPIMAGE" ]; then
@@ -605,6 +654,14 @@ jobs:
           set -euo pipefail
           python3 ./build.py             --flutter             --hwcodec             --unix-file-copy-paste             ${{ matrix.extra }}
 
+      - name: Testar defaults de conexao Magbel
+        shell: bash
+        working-directory: rustdesk
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path libs/hbb_common/Cargo.toml --lib --release --features webrtc magbel_connection_defaults | tee "$RUNNER_TEMP/magbel-settings-test.log"
+          grep -F "config::magbel_connection_tests::magbel_connection_defaults ... ok" "$RUNNER_TEMP/magbel-settings-test.log"
+
       - name: Assinatura ad-hoc e DMG
         shell: bash
         working-directory: rustdesk
@@ -616,8 +673,10 @@ jobs:
           mv "$APP" "$BRANDED_APP"
           APP="$BRANDED_APP"
           xattr -cr "$APP" || true
-          codesign --force --deep --sign - "$APP"
+          bash .github/scripts/sign-macos-app.sh "$APP" - flutter/macos/Runner/Release.entitlements
           python3 ../magbel/.github/scripts/verify_magbel_bundle.py --platform macos --bundle "$APP"
+          CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
+          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
           create-dmg             --volname "$PRODUCT_NAME"             --window-size 800 400             --icon-size 100             --app-drop-link 600 185             "../suporte-magbel-${{ needs.resolve.outputs.version }}-macos-${{ matrix.arch }}.dmg"             "$APP"
 
       - name: Upload macOS
