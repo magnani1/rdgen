@@ -431,6 +431,11 @@ jobs:
           python3 -m pip install --user "setuptools_scm<10"
           python3 -m pip install --user git+https://github.com/rustdesk-org/appimage-builder.git
           export PATH="$HOME/.local/bin:$PATH"
+          # Extrai o DEB sem depender da compressao interna (xz ou zstd).
+          sed -i \
+            -e 's|bsdtar -zxvf rustdesk.deb|dpkg-deb -x rustdesk.deb .|' \
+            -e '/tar -xvf \.\/data\.tar\.xz/d' \
+            appimage/AppImageBuilder-x86_64.yml
           pushd appimage
           ./build-apprun.sh x86_64
           sudo -E env "PATH=$PATH" appimage-builder --skip-tests --recipe ./AppImageBuilder-x86_64.yml
