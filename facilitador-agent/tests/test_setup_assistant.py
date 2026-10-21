@@ -26,7 +26,7 @@ class SetupTests(unittest.TestCase):
         args = setup.installation_args(**self.data)
         self.assertIn('-PromptRunAsCredential', args)
         self.assertNotIn('-RunAsCredential', args)
-        self.assertIn(str(self.package/'instalar-agente.ps1'),args)
+        self.assertIn(str(self.package.resolve()/'instalar-agente.ps1'),args)
         self.assertNotIn('-Command',args)
         self.assertNotIn('Bypass',args)
 
