@@ -44,7 +44,6 @@ services:
     - /opt/cortendesk/branding-1.14.0/views/layouts/partials/topbar.blade.php:/app/resources/views/layouts/partials/topbar.blade.php:ro
     - /opt/cortendesk/branding-1.14.0/views/livewire/client-download-manager.blade.php:/app/resources/views/livewire/client-download-manager.blade.php:ro
     - /opt/cortendesk/branding-1.14.0/views/livewire/settings-page.blade.php:/app/resources/views/livewire/settings-page.blade.php:ro
-    - /opt/cortendesk/branding-1.14.0/views/webclient.blade.php:/app/resources/views/webclient.blade.php:ro
     - /opt/cortendesk/branding-1.14.0/webclient/app.js:/app/public/rdclient/app.js:ro
     - /opt/cortendesk/session-bridge-1.0.0/app/Http/Controllers/MagbelSupportController.php:/app/app/Http/Controllers/MagbelSupportController.php:ro
     - /opt/cortendesk/session-bridge-1.0.0/app/Models/MagbelSupportSession.php:/app/app/Models/MagbelSupportSession.php:ro
