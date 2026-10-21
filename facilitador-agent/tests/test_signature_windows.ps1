@@ -113,6 +113,25 @@ def inspect():
     assert reports,(result.returncode,'missing fleet report')
     return reports[-1]
 assert inspect()['phase']=='Microsoft.PowerShell-Kerberos','Pacote válido não passou na conferência local'
+# Confere também o stdin JSON do controlador, sem criar sessão, pasta ou tarefa.
+install_script=script.replace("function New-PSSession { throw 'CI_NO_NETWORK' }", """
+function New-PSSession { return @{fixture=$true} }
+function Remove-PSSession { param($Session) }
+$script:Calls=0
+function Invoke-Command {
+    param($Session,$ArgumentList,$ScriptBlock)
+    $script:Calls++
+    if ($script:Calls -eq 1) { return @{ok=$true;existing_task=$false;existing_runtime=$false;python_exe='python.exe';pwsh_exe='pwsh.exe'} }
+    throw 'CI_STOP_BEFORE_STAGE'
+}
+""").replace('-Mode Inspect','-Mode Install')
+install_encoded=base64.b64encode(install_script.encode('utf-16le')).decode('ascii')
+installed=subprocess.run(['pwsh','-NoProfile','-NonInteractive','-EncodedCommand',install_encoded],
+    input=json.dumps({'code':'fixture-code','user':r'FIXTURE\executor','password':'ação-测试'}),text=True,encoding='utf-8',capture_output=True,timeout=30)
+install_reports=[json.loads(line.split(':',1)[1]) for line in installed.stdout.splitlines() if line.startswith('MAGBEL_FLEET:')]
+assert install_reports and install_reports[-1]['phase']=='stage','Entrada JSON do controlador não chegou ao staging simulado'
+print('Controlador: entrada JSON Unicode validada, sem criar sessão/pasta/tarefa')
+
 with (p/'facilitador-agent.py').open('a',encoding='utf-8') as f:f.write('\n# altered transport\n')
 assert inspect()['phase']=='package','Runtime alterado não foi recusado antes da conexão'
 print('Pacote completo assinado aceito; runtime alterado bloqueado antes de qualquer conexão WinRM')

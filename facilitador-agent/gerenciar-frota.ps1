@@ -115,7 +115,10 @@ try {
         if ($Mode -eq 'Install') {
             if ($Report.existing_task -or $Report.existing_runtime) { throw 'ExistingInstallationPreserved' }
             $Phase='credential-pipe'
-            $Secrets=[Console]::In.ReadToEnd() | ConvertFrom-Json -AsHashtable
+            $InputReader=[IO.StreamReader]::new([Console]::OpenStandardInput(),[Text.UTF8Encoding]::new($false),$true)
+            try { $InputText=$InputReader.ReadToEnd() } finally { $InputReader.Dispose() }
+            $Secrets=$InputText | ConvertFrom-Json -AsHashtable
+            $InputText=$null
             if (-not $Secrets.code -or -not $Secrets.user -or -not $Secrets.password) { throw 'MissingCredentials' }
             $Secrets.agent_id=$AgentId; $Secrets.home_url=$HomeUrl; $Secrets.scripts_root=$ScriptsRoot
             $Secrets.client_id=$ClientId; $Secrets.slots=$Slots; $Secrets.python_exe=$Report.python_exe
