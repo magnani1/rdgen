@@ -64,7 +64,7 @@ else:raise AssertionError('Modified launcher accepted')
     },$true)
     if (-not $Probe) { throw 'Sonda Python não encontrada.' }
     $env:MAGBEL_PYTHON_PROBE_EXE=(Get-Command python).Source
-    $ProbeTest='$ErrorActionPreference="Stop"; $Python=$env:MAGBEL_PYTHON_PROBE_EXE; '+$Probe.Extent.Text+@'
+    $ProbeTest='$ErrorActionPreference="Stop"; $Python=$env:MAGBEL_PYTHON_PROBE_EXE; '+$Probe.Extent.Text+";`n"+@'
 if ($LASTEXITCODE -ne 0 -or $Info.major -ne 3 -or $Info.minor -lt 12 -or $Info.bits -ne 64 -or -not $Info.executable) { throw 'Python probe failed in Windows PowerShell 5.1' }
 Write-Host 'Windows PowerShell 5.1: sonda Python real retornou JSON e arquitetura x64: OK'
 '@

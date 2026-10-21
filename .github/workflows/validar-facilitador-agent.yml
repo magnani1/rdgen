@@ -12,7 +12,7 @@ jobs:
   validar:
     strategy:
       matrix:
-        python: ['3.12', '3.14']
+        python: ['3.12', '3.14', '3.15']
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
         run: |
           $tokens = $null
           $errors = $null
-          foreach ($file in @('facilitador-agent/instalar-agente.ps1','facilitador-agent/preparar-pacote-assinado.ps1','facilitador-agent/gerenciar-frota.ps1')) {
+          foreach ($file in @('facilitador-agent/instalar-agente.ps1','facilitador-agent/preparar-pacote-assinado.ps1','facilitador-agent/gerenciar-frota.ps1','facilitador-agent/preparar-python-remoto.ps1')) {
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { $errors | Format-List; exit 1 }
           }
