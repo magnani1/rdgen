@@ -43,9 +43,24 @@ Atualizar o checkout pelo Git antes de assinar; não assinar arquivos dentro do 
 ```powershell
 $Repo = '\\facilitadorapp1\c$\Magbel\rdgen'
 $Pacote = '\\facilitadorapp1\c$\Magbel\pacotes\frota-' + (Get-Date -Format yyyyMMdd-HHmmss)
-& "$Repo\facilitador-agent\preparar-pacote-assinado.ps1" `
-    -CertificateThumbprint '828D73E9B099D50DE42443ACEF7E224EE8D52A5D' `
-    -Destination $Pacote
+$Thumbprint = '828D73E9B099D50DE42443ACEF7E224EE8D52A5D'
+$Cert = Get-ChildItem Cert:\CurrentUser\My,Cert:\LocalMachine\My -CodeSigningCert |
+    Where-Object { $_.HasPrivateKey -and $_.Thumbprint -eq $Thumbprint } |
+    Select-Object -First 1
+if (-not $Cert) { throw 'Certificado e chave privada ausentes nesta estação.' }
+
+# Cópia temporária para assinar o preparador sem modificar o checkout.
+$Fonte = Join-Path $env:TEMP ('magbel-assinatura-' + [guid]::NewGuid().ToString('N'))
+Copy-Item -LiteralPath "$Repo\facilitador-agent" -Destination $Fonte -Recurse
+try {
+    $Preparador = Join-Path $Fonte 'preparar-pacote-assinado.ps1'
+    $Assinatura = Set-AuthenticodeSignature -FilePath $Preparador -Certificate $Cert -HashAlgorithm SHA256
+    if ($Assinatura.Status -ne 'Valid') { throw 'Assinatura do preparador não validada.' }
+    & $Preparador -CertificateThumbprint $Thumbprint -Destination $Pacote
+    Write-Host "Pacote: $Pacote"
+} finally {
+    Remove-Item -LiteralPath $Fonte -Recurse -Force
+}
 ```
 
 Executar essa preparação em SEDE153729 ou outra estação que possua o certificado e sua chave privada. Se a política exigir assinatura do próprio preparador, assine a cópia usada nessa estação conforme o procedimento institucional. Nunca exportar a chave para os APPs. O EXE de instalação individual continua opcional (`-AssistantExe`).
