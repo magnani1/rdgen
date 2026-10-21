@@ -1,0 +1,2 @@
+# Somente para produzir o assistente EXE; não é dependência do agente.
+pyinstaller==6.16.0

@@ -1,0 +1,128 @@
+{
+  "version": "1.14.0",
+  "image": "ghcr.io/marcpope/cortendesk:1.14.0",
+  "files": [
+    {
+      "local": "app/Http/Controllers/WebClientPageController.php",
+      "upstream": "app/Http/Controllers/WebClientPageController.php",
+      "source_sha256": "18a091f8f0da9d0b5927424065c4ff256ae5b22fe64c2e0ccbaa67ac48de9a54"
+    },
+    {
+      "local": "app/Livewire/ClientDownloadManager.php",
+      "upstream": "app/Livewire/ClientDownloadManager.php",
+      "source_sha256": "727865812283ab24c33123ecd3a3e4d6ab863c222e43e3cec1f05e5813b3c912"
+    },
+    {
+      "local": "app/Services/AppriseNotifications.php",
+      "upstream": "app/Services/AppriseNotifications.php",
+      "source_sha256": "0ce114c1701e6197cb435989b002efd8894a2645cf5aec9e666c92e5e1d71d55"
+    },
+    {
+      "local": "app/Support/Asset.php",
+      "upstream": "app/Support/Asset.php",
+      "source_sha256": "209e5d01a30bfa724fa81071041ec561c196d57607e00afcedcf61a0bd37509e"
+    },
+    {
+      "local": "app/Support/TwoFactor.php",
+      "upstream": "app/Support/TwoFactor.php",
+      "source_sha256": "f32f08622cd94bf4e8491d191673d164365b91ae0aade02bbe6e3ec306fae0c7"
+    },
+    {
+      "local": "config/app.php",
+      "upstream": "config/app.php",
+      "source_sha256": "a526f3382ce4d0461d1217838e4470f1137d8d209347685dd232886cc03f593c"
+    },
+    {
+      "local": "views/auth/email-challenge.blade.php",
+      "upstream": "resources/views/auth/email-challenge.blade.php",
+      "source_sha256": "ac8b0b1e5ebcf9f90ee3b588544b68d6e1f7ced21a6658da1bcfa5398942b370"
+    },
+    {
+      "local": "views/auth/invite.blade.php",
+      "upstream": "resources/views/auth/invite.blade.php",
+      "source_sha256": "dc409840a6c6efb52a16469adab214754d123f2bc188cdc9e33588df0c31233d"
+    },
+    {
+      "local": "views/auth/login.blade.php",
+      "upstream": "resources/views/auth/login.blade.php",
+      "source_sha256": "f642767cbe472f346914820fdc19fc90a2578791a9651bf49a959bae96471093"
+    },
+    {
+      "local": "views/auth/oidc-client-result.blade.php",
+      "upstream": "resources/views/auth/oidc-client-result.blade.php",
+      "source_sha256": "22cc87536abab6eae0b5ba709066915b2cbd9ebe92fc115353d24dc629a2e8b9"
+    },
+    {
+      "local": "views/auth/password-request.blade.php",
+      "upstream": "resources/views/auth/password-request.blade.php",
+      "source_sha256": "5ef73501f8221ca8e0f1870c81a349c831f16d805fa3342d1bae4dc74a44b6e3"
+    },
+    {
+      "local": "views/auth/password-reset.blade.php",
+      "upstream": "resources/views/auth/password-reset.blade.php",
+      "source_sha256": "812898f91f2bc97fbbcb6a0ea3bfd35e68f82520a86323ed47be923daf99f255"
+    },
+    {
+      "local": "views/auth/two-factor-challenge.blade.php",
+      "upstream": "resources/views/auth/two-factor-challenge.blade.php",
+      "source_sha256": "3f890ecbc8e38623f551268902364e381a950493420edc396d9eb09ea4e3ed71"
+    },
+    {
+      "local": "views/diagnostics-index.blade.php",
+      "upstream": "resources/views/diagnostics/index.blade.php",
+      "source_sha256": "4f6a56824465129953fad5ff3b0ab7be1aba4b9d83e9d566636c824909cecdeb"
+    },
+    {
+      "local": "views/downloads-index.blade.php",
+      "upstream": "resources/views/downloads/index.blade.php",
+      "source_sha256": "1f63abdc06984deb2a3ddb7bf49c87797b642bf522409f5019276bf37c81d2fb"
+    },
+    {
+      "local": "views/layouts/app.blade.php",
+      "upstream": "resources/views/layouts/app.blade.php",
+      "source_sha256": "e7412765fb1edc7c5577a2a506e231f41b3bca52a83c8a604ed22f7d997899c4"
+    },
+    {
+      "local": "views/layouts/guest.blade.php",
+      "upstream": "resources/views/layouts/guest.blade.php",
+      "source_sha256": "3735e5b0a1f02063046a337fd5d3b4a4708582f14552f34440fd917ac9f2eac5"
+    },
+    {
+      "local": "views/layouts/partials/sidebar.blade.php",
+      "upstream": "resources/views/layouts/partials/sidebar.blade.php",
+      "source_sha256": "be34cc03b3f669c79ad4ae8b9107b3251b69271d9583d1fdc58d546b22a40201"
+    },
+    {
+      "local": "views/layouts/partials/topbar.blade.php",
+      "upstream": "resources/views/layouts/partials/topbar.blade.php",
+      "source_sha256": "9eefb631be670b1cfb832d18da15d41adc80b3521fd1de99d69243ad7e61aa0c"
+    },
+    {
+      "local": "views/livewire/client-download-manager.blade.php",
+      "upstream": "resources/views/livewire/client-download-manager.blade.php",
+      "source_sha256": "706bfc9424fcfd636ce2855608756717be249c8a0d5399ba21c90251ab4a3ba4"
+    },
+    {
+      "local": "views/livewire/settings-page.blade.php",
+      "upstream": "resources/views/livewire/settings-page.blade.php",
+      "source_sha256": "44904204c1dcdc2bee4ec0317582310ce01e5bb4fa53ed2c6d1eb6a158967b88"
+    },
+    {
+      "local": "views/webclient.blade.php",
+      "upstream": "resources/views/webclient.blade.php",
+      "source_sha256": "4bd0a7d80bd2c80aa3ad9515030f85f74db493ebd808bce4fa26123cb7262893"
+    },
+    {
+      "local": "webclient/app.js",
+      "upstream": "public/rdclient/app.js",
+      "source_sha256": "66d64e6c8472776012fad5f7b36a6f7a4fed75f4b596372f3bb4c740f9f49ade"
+    }
+  ],
+  "assets": {
+    "cortendesk-logo-light.svg": "3d17ec9d8d9c2356becbc069b3a25a5f4a4fcd9864d55d82c8ec84d2959ee69b",
+    "cortendesk-logo-dark.svg": "bb18339c18fcc25cd06ab118d51a58a4a0db0e936e5ba7e6afb5057611a3608e",
+    "cortendesk-sm.svg": "878a69866410c40c5c2f047552b1c92efe05acc6efe53cf47abd4a6e6f668b17",
+    "icons/favicon.ico": "d76b3695c7d37bee2424edab9aa44c9da5ba3e06d415598b08332ee84febcb00",
+    "icons/magbel-remote-256.png": "b174708636af38d566d1d08802eaf2dbce604682d29ce106d2d1c21a0539edef"
+  }
+}

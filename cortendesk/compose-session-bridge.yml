@@ -1,0 +1,72 @@
+services:
+  cortendesk:
+    image: ghcr.io/marcpope/cortendesk:1.14.0
+    container_name: suporte_remoto
+    hostname: suporte
+    restart: unless-stopped
+    environment:
+      APP_NAME: Magbel Remote
+      APP_URL: https://suporte.magbel.com.br
+      SESSION_SECURE_COOKIE: 'true'
+      CORTENDESK_ID_SERVER: rustdesk.magbel.com.br:21116
+      CORTENDESK_RELAY_SERVER: rustdesk.magbel.com.br:21117
+      CORTENDESK_PUBLIC_KEY: C8F+OtI1MIGs193mJnfYZcwl5iLmOWev5s+8gTWmFkE=
+      CORTENDESK_RDGEN_URL: ${CORTENDESK_RDGEN_URL}
+      CORTENDESK_NATIVE_WEBCLIENT: 'true'
+      CORTENDESK_EMBEDDED_SERVER: 'true'
+      MAGBEL_SESSION_TOKEN_GROUPS: '{"facilitador-tjpb-sessoes":"TJPB"}'
+    volumes:
+    - /opt/cortendesk/data:/data
+    - /opt/cortendesk/branding-1.14.0/cortendesk-logo-light.svg:/app/public/assets/images/cortendesk-logo-light.svg:ro
+    - /opt/cortendesk/branding-1.14.0/cortendesk-logo-dark.svg:/app/public/assets/images/cortendesk-logo-dark.svg:ro
+    - /opt/cortendesk/branding-1.14.0/cortendesk-sm.svg:/app/public/assets/images/cortendesk-sm.svg:ro
+    - /opt/cortendesk/branding-1.14.0/icons/favicon.ico:/app/public/favicon.ico:ro
+    - /opt/cortendesk/branding-1.14.0/icons/favicon.ico:/app/public/assets/images/favicon.ico:ro
+    - /opt/cortendesk/branding-1.14.0/icons/magbel-remote-256.png:/app/public/rdclient/logo.png:ro
+    - /opt/cortendesk/branding-1.14.0/app/Http/Controllers/WebClientPageController.php:/app/app/Http/Controllers/WebClientPageController.php:ro
+    - /opt/cortendesk/branding-1.14.0/app/Livewire/ClientDownloadManager.php:/app/app/Livewire/ClientDownloadManager.php:ro
+    - /opt/cortendesk/branding-1.14.0/app/Services/AppriseNotifications.php:/app/app/Services/AppriseNotifications.php:ro
+    - /opt/cortendesk/branding-1.14.0/app/Support/Asset.php:/app/app/Support/Asset.php:ro
+    - /opt/cortendesk/branding-1.14.0/app/Support/TwoFactor.php:/app/app/Support/TwoFactor.php:ro
+    - /opt/cortendesk/branding-1.14.0/config/app.php:/app/config/app.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/auth/email-challenge.blade.php:/app/resources/views/auth/email-challenge.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/auth/invite.blade.php:/app/resources/views/auth/invite.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/auth/login.blade.php:/app/resources/views/auth/login.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/auth/oidc-client-result.blade.php:/app/resources/views/auth/oidc-client-result.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/auth/password-request.blade.php:/app/resources/views/auth/password-request.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/auth/password-reset.blade.php:/app/resources/views/auth/password-reset.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/auth/two-factor-challenge.blade.php:/app/resources/views/auth/two-factor-challenge.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/diagnostics-index.blade.php:/app/resources/views/diagnostics/index.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/downloads-index.blade.php:/app/resources/views/downloads/index.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/layouts/app.blade.php:/app/resources/views/layouts/app.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/layouts/guest.blade.php:/app/resources/views/layouts/guest.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/layouts/partials/sidebar.blade.php:/app/resources/views/layouts/partials/sidebar.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/layouts/partials/topbar.blade.php:/app/resources/views/layouts/partials/topbar.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/livewire/client-download-manager.blade.php:/app/resources/views/livewire/client-download-manager.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/views/livewire/settings-page.blade.php:/app/resources/views/livewire/settings-page.blade.php:ro
+    - /opt/cortendesk/branding-1.14.0/webclient/app.js:/app/public/rdclient/app.js:ro
+    - /opt/cortendesk/session-bridge-1.0.0/app/Http/Controllers/MagbelSupportController.php:/app/app/Http/Controllers/MagbelSupportController.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/app/Models/MagbelSupportSession.php:/app/app/Models/MagbelSupportSession.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/app/Providers/MagbelSessionProvider.php:/app/app/Providers/MagbelSessionProvider.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/config/magbel-support.php:/app/config/magbel-support.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/database/migrations/magbel-support/2026_10_21_000001_create_magbel_support_sessions.php:/app/database/migrations/magbel-support/2026_10_21_000001_create_magbel_support_sessions.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/public/magbel-support/guard.js:/app/public/magbel-support/guard.js:ro
+    - /opt/cortendesk/session-bridge-1.0.0/public/magbel-support/launch.js:/app/public/magbel-support/launch.js:ro
+    - /opt/cortendesk/session-bridge-1.0.0/resources/views/magbel-support/closed.blade.php:/app/resources/views/magbel-support/closed.blade.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/resources/views/magbel-support/launch.blade.php:/app/resources/views/magbel-support/launch.blade.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/routes/magbel-support.php:/app/routes/magbel-support.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/bootstrap/providers.php:/app/bootstrap/providers.php:ro
+    - /opt/cortendesk/session-bridge-1.0.0/resources/views/webclient.blade.php:/app/resources/views/webclient.blade.php:ro
+    ports:
+    - 21115-21119:21115-21119/tcp
+    - 21116:21116/udp
+    expose:
+    - '8080'
+    networks:
+      portainer_network:
+        aliases:
+        - cortendesk
+        - suporte
+networks:
+  portainer_network:
+    external: true
