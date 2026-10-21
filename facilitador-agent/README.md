@@ -6,6 +6,10 @@ Executor Windows do Facilitador, separado do repositório do backend. Adaptado d
 
 Requer backend com `/fila/enroll` e `/fila/heartbeat` (entrega agentes/contratos/suporte de 21/10/2026), Python 3.12+ x64 (3.14 x64 recomendado para novas instalações), PowerShell 7, RSAT para autenticação/AD e os direitos efetivos das ações executadas. O instalador não concede esses direitos.
 
+## Assistente EXE
+
+Interface inicial e distribuição assinada: [ASSISTENTE-EXE.md](ASSISTENTE-EXE.md). O assistente abre o próprio PowerShell para pedir a credencial e o código; não transporta PSCredential entre processos. Não instala dependências do domínio nem dispensa o runtime Python do executor.
+
 ## Instalação
 
 Cadastre o agente no painel administrativo do cliente; ele nasce drenado. Use o código de inscrição de 10 minutos. No APP correspondente, PowerShell elevado, a partir do checkout deste repositório:
