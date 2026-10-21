@@ -1,6 +1,0 @@
-__pycache__/
-*.pyc
-identity.json
-config.json
-*.log
-venv/

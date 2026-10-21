@@ -1,2 +1,0 @@
-# Branding hashes are byte-exact; Windows autocrlf must not rewrite SVGs.
-branding/** -text
