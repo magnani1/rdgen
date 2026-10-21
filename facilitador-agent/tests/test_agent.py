@@ -42,4 +42,23 @@ class AgentTests(unittest.TestCase):
         with patch.object(agent.shutil,'which',return_value=None),patch.object(agent.os.path,'isdir',return_value=False),patch.object(agent.os.path,'isfile',return_value=False):
             ready,diagnostic=agent.prontidao();self.assertFalse(ready);self.assertIn('pwsh ausente',diagnostic)
 
+    def test_stop_waits_for_local_work_and_server_ack(self):
+        try:
+            agent.RUNNING['job']='token'
+            with patch.object(agent,'api') as api:
+                self.assertFalse(agent.comunicar_saida());api.assert_not_called()
+            agent.RUNNING.clear()
+            with patch.object(agent,'api') as api:
+                api.return_value.json.return_value={'ok':True,'desired':'stop'}
+                self.assertTrue(agent.comunicar_saida())
+                self.assertTrue(api.call_args.args[1].endswith('/fila/stopped'))
+                api.return_value.json.return_value={'ok':False}
+                self.assertFalse(agent.comunicar_saida())
+        finally:agent.RUNNING.clear()
+
+    def test_stop_exits_polling_cleanly_without_new_work(self):
+        with patch.object(agent,'carregar_identidade'),patch.object(agent,'IDENTITY',{'agent_id':'app1'}),patch.object(agent,'DESIRED','stop'),patch.object(agent.threading,'Thread'),patch.object(agent,'comunicar_saida',return_value=True),patch.object(agent,'EXEC_POOL') as pool,patch.object(agent,'enviar_inventario') as inventory,patch.object(agent,'api') as api:
+            agent.loop();pool.shutdown.assert_called_once_with(wait=True)
+            inventory.assert_not_called();api.assert_not_called()
+
 if __name__=='__main__':unittest.main()
