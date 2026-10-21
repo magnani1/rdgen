@@ -14,6 +14,7 @@ param(
     [System.Management.Automation.PSCredential]$RunAsCredential,
     [switch]$RecreateVenv,
     [string]$SigningCertificateThumbprint = '',
+    [string]$SignedLauncherPath = '',
     [string]$PackageRoot = $PSScriptRoot
 )
 $ErrorActionPreference = 'Stop'
@@ -49,6 +50,16 @@ function Register-AgentTask {
     }
 }
 
+function Assert-SignedAgentLauncher {
+    param([string]$Path, [string]$ExpectedThumbprint)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'Launcher assinado não encontrado.' }
+    $Signature = Get-AuthenticodeSignature -FilePath $Path
+    if ($Signature.Status -ne 'Valid' -or -not $Signature.SignerCertificate) { throw 'Launcher sem assinatura válida e confiável.' }
+    if ($ExpectedThumbprint -and $Signature.SignerCertificate.Thumbprint -ne $ExpectedThumbprint) {
+        throw 'O launcher deve usar o mesmo certificado de assinatura do instalador.'
+    }
+}
+
 function Get-AgentLauncher {
     return @'
 $ErrorActionPreference = 'Stop'
@@ -74,6 +85,12 @@ if ($AgentId -notmatch '^[a-zA-Z0-9_.-]{1,64}$') { throw 'AgentId inválido.' }
 $TaskName = "Magbel-Facilitador-$AgentId"
 $Existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($Existing -and $Existing.State -eq 'Running') { throw 'Drene o agente, aguarde zerar os trabalhos e pare a tarefa antes de atualizar.' }
+$InstallerSignature = Get-AuthenticodeSignature -FilePath $PSCommandPath
+$ExpectedSigner = $InstallerSignature.SignerCertificate.Thumbprint
+if ($SignedLauncherPath) {
+    $SignedLauncherPath = (Resolve-Path -LiteralPath $SignedLauncherPath).Path
+    Assert-SignedAgentLauncher $SignedLauncherPath $ExpectedSigner
+}
 $Root = Join-Path $env:ProgramData "Magbel\FacilitadorAgent\$AgentId"
 New-Item -ItemType Directory -Path $Root -Force | Out-Null
 # Proteção inicial; acesso de leitura da identidade selecionada é aplicado antes de iniciar a tarefa.
@@ -83,16 +100,16 @@ $RunAsSid = if ($RunAsCredential) {
     ([System.Security.Principal.NTAccount]::new($RunAsCredential.UserName)).Translate([System.Security.Principal.SecurityIdentifier]).Value
 } else { 'S-1-5-18' }
 # Resolve o certificado antes de alterar runtime/tarefa. Reutiliza a assinatura do instalador quando possível.
-if (-not $SigningCertificateThumbprint) {
+if (-not $SignedLauncherPath -and -not $SigningCertificateThumbprint) {
     $SigningCertificateThumbprint = (Get-AuthenticodeSignature -FilePath $PSCommandPath).SignerCertificate.Thumbprint
 }
 $SigningCertificate = $null
-if ($SigningCertificateThumbprint) {
+if (-not $SignedLauncherPath -and $SigningCertificateThumbprint) {
     foreach ($Store in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')) {
         $Candidate = Get-Item "$Store\$SigningCertificateThumbprint" -ErrorAction SilentlyContinue
         if ($Candidate -and $Candidate.HasPrivateKey) { $SigningCertificate = $Candidate; break }
     }
-    if (-not $SigningCertificate) { throw 'Certificado de assinatura com chave privada não encontrado nos repositórios do instalador.' }
+    if (-not $SigningCertificate) { throw 'Chave privada ausente. Use o pacote preparado na estação de assinatura e -SignedLauncherPath; não copie a chave privada para o APP.' }
 }
 $ConfigPath = Join-Path $Root 'config.json'
 $PreviousSid = if (Test-Path $ConfigPath) { (Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json).AGENT_RUN_AS_SID } else { $null }
@@ -154,7 +171,12 @@ if (-not (Test-Path "$Root\identity.json")) {
         Remove-Item Env:\AGENT_ENROLLMENT_CODE -ErrorAction SilentlyContinue
     }
 }
-Get-AgentLauncher | Set-Content "$Root\run-agent.ps1" -Encoding utf8BOM
+if ($SignedLauncherPath) {
+    Copy-Item -LiteralPath $SignedLauncherPath -Destination "$Root\run-agent.ps1" -Force
+    Assert-SignedAgentLauncher "$Root\run-agent.ps1" $ExpectedSigner
+} else {
+    Get-AgentLauncher | Set-Content "$Root\run-agent.ps1" -Encoding utf8BOM
+}
 if ($SigningCertificate) {
     $Signature = Set-AuthenticodeSignature -FilePath "$Root\run-agent.ps1" -Certificate $SigningCertificate -HashAlgorithm SHA256
     if ($Signature.Status -ne 'Valid') { throw "Assinatura do launcher inválida: $($Signature.Status). A tarefa não foi atualizada." }

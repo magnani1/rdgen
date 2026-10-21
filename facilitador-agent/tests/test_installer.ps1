@@ -24,6 +24,16 @@ Register-AgentTask -Registration @{TaskName='test';Action='test';Force=$true} -C
 if ($script:Registration.User -ne 'TEST\executor' -or $script:Registration.Password -ne 'unit-test-only' -or $script:Registration.ContainsKey('Principal')) { throw 'Conta de rede registrada incorretamente.' }
 Register-AgentTask -Registration @{TaskName='test';Action='test';Force=$true}
 if ($script:Registration.Principal.LogonType -ne 'ServiceAccount' -or $script:Registration.ContainsKey('Password')) { throw 'Compatibilidade SYSTEM incorreta.' }
+# Valida distribuição sem chave privada: assinatura válida e mesmo publicador.
+$script:MockSignature = @{Status='Valid';SignerCertificate=@{Thumbprint='EXPECTED'}}
+function Get-AuthenticodeSignature { param($FilePath); return $script:MockSignature }
+Assert-SignedAgentLauncher $Installer 'EXPECTED'
+foreach ($Case in @(@{Status='NotSigned';SignerCertificate=$null}, @{Status='HashMismatch';SignerCertificate=@{Thumbprint='EXPECTED'}}, @{Status='Valid';SignerCertificate=@{Thumbprint='OTHER'}})) {
+    $script:MockSignature=$Case
+    $Rejected=$false
+    try { Assert-SignedAgentLauncher $Installer 'EXPECTED' } catch { $Rejected=$true }
+    if (-not $Rejected) { throw 'Launcher sem assinatura válida ou com publicador diferente foi aceito.' }
+}
 # Executa launcher real em processo pwsh, com Python de teste; valida stdout Unicode e exit code.
 $Temp = Join-Path ([IO.Path]::GetTempPath()) ('facilitador-installer-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $Temp | Out-Null
