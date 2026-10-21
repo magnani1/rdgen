@@ -39,6 +39,22 @@ class SetupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             setup.installation_args(**self.data)
 
+    def test_encoded_transport_and_missing_report_are_distinct(self):
+        import base64
+        with patch.object(subprocess,'CREATE_NO_WINDOW',0,create=True), patch.object(subprocess,'run') as run:
+            run.return_value = subprocess.CompletedProcess([],0,'{"valid":true}','')
+            setup.verify_package('pwsh',self.package)
+            args=run.call_args.args[0]
+            self.assertIn('-EncodedCommand',args)
+            self.assertNotIn('input',run.call_args.kwargs)
+            self.assertEqual(base64.b64decode(args[-1]).decode('utf-16le'),setup.VERIFY_SIGNATURES)
+            run.return_value=subprocess.CompletedProcess([],0,'','')
+            with self.assertRaisesRegex(ValueError,'não retornou um relatório'):
+                setup.verify_package('pwsh',self.package)
+            run.side_effect=subprocess.TimeoutExpired(args,30)
+            with self.assertRaisesRegex(ValueError,'excedeu 30 segundos'):
+                setup.verify_package('pwsh',self.package)
+
     def test_signature_validation_is_required(self):
         with patch.object(subprocess,'CREATE_NO_WINDOW',0,create=True), patch.object(subprocess,'run') as run:
             run.return_value = subprocess.CompletedProcess([],0,'{"valid":true}','')

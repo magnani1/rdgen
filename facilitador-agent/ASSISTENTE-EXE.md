@@ -67,3 +67,7 @@ Após conclusão: conferir tarefa, LogonType Password, log UTF-8, heartbeat e pr
 Testes automatizados cobrem argumentos sem segredos/shell, entradas inválidas, pacote incompleto e falha de validação de assinatura. O teste Windows do instalador cobre versão Python, credencial, publicador do launcher, Unicode e exit code; o build gera o PE Windows. Não substituem abrir o EXE assinado e testar GPO/PKI/UNC/WinRM no APP1. Não declarar o piloto aprovado até esse aceite.
 
 Depois do piloto: incorporar runtime do executor, garantir integridade assinada do pacote inteiro, oferecer diagnóstico acessível após falha, atualização com rollback, pacote WinGet e eventual MSI. Manter source, builds e assinaturas separados; não versionar identidade, venv, logs, códigos de inscrição ou certificado privado.
+
+## Correção da verificação de assinatura
+
+A consulta usa agora PowerShell -EncodedCommand com script estático UTF-16LE e relatório JSON UTF-8. Não transmite segredos nem desabilita ExecutionPolicy. Ausência de relatório, timeout e assinatura recusada têm mensagens distintas; a consulta continua exigindo assinatura Valid e mesmo certificado para os três arquivos. A CI Windows cria certificado descartável somente no runner, assina cópias de scripts e EXE e confirma aceitação do pacote e recusa de launcher alterado. Esse certificado nunca é distribuído nem incluído no artefato.
