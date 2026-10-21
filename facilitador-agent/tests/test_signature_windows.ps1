@@ -59,9 +59,10 @@ else:raise AssertionError('Modified launcher accepted')
     @'
 param([string]$Mode)
 $ErrorActionPreference='Stop'
-$Raw=[Console]::In.ReadToEnd()
+$Reader=[IO.StreamReader]::new([Console]::OpenStandardInput(),[Text.UTF8Encoding]::new($false),$true)
+$Raw=$Reader.ReadToEnd(); $Reader.Dispose()
 if (-not $Raw) { exit 94 }
-try { $Decoded=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Raw)) } catch { exit 95 }
+try { $Decoded=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Raw)) } catch { [Console]::WriteLine('CI_PIPE_SHAPE:'+($Raw.Length)+':'+(($Raw.ToCharArray() | Select-Object -First 4 | ForEach-Object {[int]$_}) -join ',')); exit 95 }
 try { $Data=$Decoded | ConvertFrom-Json } catch { exit 96 }
 if ($Mode -ne 'LocalInstall') { exit 91 }
 if ($Data.password -ne 'ação-测试') { exit 92 }

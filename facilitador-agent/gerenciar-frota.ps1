@@ -78,7 +78,10 @@ try {
     }
     if ($Mode -eq 'LocalInstall') {
         $Phase='local-install'
-        $Secrets=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())) | ConvertFrom-Json
+        $InputReader=[IO.StreamReader]::new([Console]::OpenStandardInput(),[Text.UTF8Encoding]::new($false),$true)
+        try { $InputText=$InputReader.ReadToEnd() } finally { $InputReader.Dispose() }
+        $Secrets=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($InputText)) | ConvertFrom-Json
+        $InputText=$null
         if (-not $Secrets.code -or -not $Secrets.user -or -not $Secrets.password -or $Secrets.agent_id -notmatch '^[a-zA-Z0-9-]{1,63}$' -or $env:COMPUTERNAME -ine $Secrets.agent_id) { throw 'InvalidLocalPlan' }
         $AgentId=$Secrets.agent_id
         $Root=Join-Path $env:ProgramData "Magbel\FacilitadorAgent\$AgentId"
