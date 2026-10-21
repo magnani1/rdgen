@@ -48,7 +48,8 @@ function Invoke-FleetLocalProcess {
         $Text=$Output.GetAwaiter().GetResult()
         $null=$Errors.GetAwaiter().GetResult() # Nunca retornar stderr que possa incluir argumentos.
         $Reports=@($Text -split '\r?\n' | Where-Object { $_.StartsWith('MAGBEL_FLEET:') })
-        if ($Process.ExitCode -ne 0 -or -not $Reports.Count) { throw 'LocalInstallerFailed' }
+        if ($Process.ExitCode -ne 0) { throw ('LocalInstallerExit'+$Process.ExitCode) }
+        if (-not $Reports.Count) { throw 'LocalInstallerNoReport' }
         $Report=$Reports[-1].Substring(13) | ConvertFrom-Json
         if (-not $Report.ok) { throw 'LocalInstallerFailed' }
         return @{ok=$true;pending=$false}
@@ -135,8 +136,8 @@ try {
     }
     [Console]::WriteLine('MAGBEL_FLEET:'+($Report | ConvertTo-Json -Compress))
 } catch {
-    $Known=@('InvalidTarget','UnpreparedPackage','InvalidManifest','PackageHashMismatch','InvalidPackageSignature','HostIdentityMismatch','AdministratorRequired','LocalPowerShell7Required','Python312PlusX64Required','ExistingInstallationPreserved','MissingCredentials','StageAclFailed','RemoteHashMismatch','RemoteSignatureUntrusted','TaskNetworkLogonRequired','InvalidLocalPlan','LocalInstallerFailed','InstallerTimeoutCheckHost')
-    $Id=if ($_.Exception.Message -in $Known) { $_.Exception.Message } else { $_.Exception.GetType().Name }
+    $Known=@('InvalidTarget','UnpreparedPackage','InvalidManifest','PackageHashMismatch','InvalidPackageSignature','HostIdentityMismatch','AdministratorRequired','LocalPowerShell7Required','Python312PlusX64Required','ExistingInstallationPreserved','MissingCredentials','StageAclFailed','RemoteHashMismatch','RemoteSignatureUntrusted','TaskNetworkLogonRequired','InvalidLocalPlan','LocalInstallerFailed','LocalInstallerNoReport','InstallerTimeoutCheckHost')
+    $Id=if ($_.Exception.Message -in $Known -or $_.Exception.Message -match '^LocalInstallerExit-?\d+$') { $_.Exception.Message } else { $_.Exception.GetType().Name }
     [Console]::WriteLine('MAGBEL_FLEET:'+(@{ok=$false;phase=$Phase;error_id=$Id} | ConvertTo-Json -Compress))
     exit 1
 } finally {

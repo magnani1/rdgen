@@ -60,7 +60,9 @@ else:raise AssertionError('Modified launcher accepted')
 param([string]$Mode)
 $ErrorActionPreference='Stop'
 $Data=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())) | ConvertFrom-Json
-if ($Mode -ne 'LocalInstall' -or $Data.password -ne 'ação-测试' -or $Data.code -ne 'fixture-code') { exit 9 }
+if ($Mode -ne 'LocalInstall') { exit 91 }
+if ($Data.password -ne 'ação-测试') { exit 92 }
+if ($Data.code -ne 'fixture-code') { exit 93 }
 [Console]::WriteLine('MAGBEL_FLEET:{"ok":true}')
 '@ | Set-Content -LiteralPath $RealHelper -Encoding utf8BOM
     $StubSignature=Set-AuthenticodeSignature -FilePath $RealHelper -Certificate $Certificate -HashAlgorithm SHA256
