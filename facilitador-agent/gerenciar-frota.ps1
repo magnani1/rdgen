@@ -33,6 +33,8 @@ function Invoke-FleetLocalProcess {
     $Info.FileName=$PwshExe
     $Info.Arguments='-NoProfile -NonInteractive -File "'+(Join-Path $Package 'gerenciar-frota.ps1')+'" -Mode LocalInstall'
     $Info.UseShellExecute=$false; $Info.CreateNoWindow=$true
+    # Cada versão reconstrói seus caminhos padrão; não herdar módulos incompatíveis do host 5.1.
+    $Info.EnvironmentVariables.Remove('PSModulePath')
     $Info.RedirectStandardInput=$true; $Info.RedirectStandardOutput=$true; $Info.RedirectStandardError=$true
     $Info.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
     $Info.StandardErrorEncoding=[Text.UTF8Encoding]::new($false)
@@ -43,7 +45,10 @@ function Invoke-FleetLocalProcess {
         $Errors=$Process.StandardError.ReadToEndAsync()
         # Base64 evita dependência da página de código do host 5.1; não é criptografia.
         # O conteúdo sensível permanece apenas no pipe/memória da sessão autenticada.
-        $Process.StandardInput.Write($Payload64); $Process.StandardInput.Close()
+        $InputBytes=[Text.Encoding]::ASCII.GetBytes($Payload64)
+        $Pipe=$Process.StandardInput.BaseStream
+        $Pipe.Write($InputBytes,0,$InputBytes.Length); $Pipe.Flush(); $Pipe.Close()
+        $InputBytes=$null
         if (-not $Process.WaitForExit(840000)) { return @{ok=$false;pending=$true;error_id='InstallerTimeoutCheckHost'} }
         $Text=$Output.GetAwaiter().GetResult()
         $null=$Errors.GetAwaiter().GetResult() # Nunca retornar stderr que possa incluir argumentos.

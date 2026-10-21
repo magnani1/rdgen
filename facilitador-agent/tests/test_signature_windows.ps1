@@ -59,7 +59,10 @@ else:raise AssertionError('Modified launcher accepted')
     @'
 param([string]$Mode)
 $ErrorActionPreference='Stop'
-$Data=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())) | ConvertFrom-Json
+$Raw=[Console]::In.ReadToEnd()
+if (-not $Raw) { exit 94 }
+try { $Decoded=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Raw)) } catch { exit 95 }
+try { $Data=$Decoded | ConvertFrom-Json } catch { exit 96 }
 if ($Mode -ne 'LocalInstall') { exit 91 }
 if ($Data.password -ne 'ação-测试') { exit 92 }
 if ($Data.code -ne 'fixture-code') { exit 93 }
