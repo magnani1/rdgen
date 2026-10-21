@@ -3,6 +3,8 @@
 O executável requer pacote institucional assinado ao lado dele. Não incorpora
 certificados, tokens, scripts do cliente nem runtime do executor Python.
 """
+import base64
+import json
 import os
 from pathlib import Path
 import re
@@ -15,18 +17,27 @@ from urllib.parse import urlsplit
 
 VERIFY_SIGNATURES = r'''
 $ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
 try {
   $Files=@((Join-Path $env:MAGBEL_SETUP_PACKAGE 'instalar-agente.ps1'),(Join-Path $env:MAGBEL_SETUP_PACKAGE 'run-agent.ps1'))
   if ($env:MAGBEL_SETUP_EXE) { $Files += $env:MAGBEL_SETUP_EXE }
   $Signer=$null
+  $Valid=$true
+  $Checks=@()
   foreach ($File in $Files) {
-    $Signature=Get-AuthenticodeSignature -FilePath $File
-    if ($Signature.Status -ne 'Valid' -or -not $Signature.SignerCertificate) { throw 'Assinatura inválida ou publicador sem confiança.' }
-    if ($Signer -and $Signer -ne $Signature.SignerCertificate.Thumbprint) { throw 'Os arquivos devem usar o mesmo certificado.' }
-    $Signer=$Signature.SignerCertificate.Thumbprint
+    $Signature=Get-AuthenticodeSignature -LiteralPath $File
+    $Thumbprint=$Signature.SignerCertificate.Thumbprint
+    $SameSigner=(-not $Signer -or $Signer -eq $Thumbprint)
+    if ($Signature.Status -ne 'Valid' -or -not $Thumbprint -or -not $SameSigner) { $Valid=$false }
+    $Checks += @{file=[IO.Path]::GetFileName($File);status=[string]$Signature.Status;same_signer=[bool]$SameSigner}
+    if (-not $Signer) { $Signer=$Thumbprint }
   }
-  [Console]::Write('{"valid":true}')
-} catch { [Console]::Error.Write('Não foi possível validar as assinaturas do pacote.'); exit 1 }
+  [Console]::Write((@{valid=[bool]$Valid;checks=$Checks} | ConvertTo-Json -Compress -Depth 4))
+  if (-not $Valid) { exit 1 }
+} catch {
+  [Console]::Write('{"valid":false,"code":"check_failed"}')
+  exit 1
+}
 '''
 
 
@@ -63,11 +74,28 @@ def verify_package(pwsh, package, executable=None):
     env = os.environ.copy()
     env['MAGBEL_SETUP_PACKAGE'] = str(Path(package).resolve())
     env['MAGBEL_SETUP_EXE'] = str(executable or '')
-    result = subprocess.run([pwsh, '-NoProfile', '-NonInteractive', '-Command', '-'],
-                            input=VERIFY_SIGNATURES, text=True, capture_output=True,
-                            env=env, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
-    if result.returncode or '"valid":true' not in result.stdout:
-        raise ValueError('Assinatura inválida, arquivo modificado ou certificado sem confiança. Confira o pacote institucional.')
+    # -Command - lê stdin como comandos interativos; blocos multilinha podem
+    # terminar sem executar e sem retornar relatório. EncodedCommand entrega
+    # um script completo, estático, UTF-16LE; caminhos continuam apenas no env.
+    encoded = base64.b64encode(VERIFY_SIGNATURES.encode('utf-16le')).decode('ascii')
+    try:
+        result = subprocess.run([pwsh, '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+                                text=True, encoding='utf-8', errors='replace', capture_output=True,
+                                env=env, timeout=30, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except subprocess.TimeoutExpired as error:
+        raise ValueError('A consulta de assinaturas excedeu 30 segundos. A confiança não foi determinada; confira cadeia e acesso à revogação no Windows.') from error
+    try:
+        report = json.loads(result.stdout.strip().lstrip('\ufeff'))
+    except (ValueError, TypeError) as error:
+        raise ValueError(f'O PowerShell não retornou um relatório de assinaturas válido (código {result.returncode}). Isso não comprova assinatura inválida.') from error
+    if not isinstance(report, dict):
+        raise ValueError('O PowerShell retornou um relatório inesperado; a assinatura não foi determinada.')
+    if result.returncode or report.get('valid') is not True:
+        details = '; '.join(f"{item.get('file', '?')}: {item.get('status', '?')}"
+                            + (' (certificado diferente)' if item.get('same_signer') is False else '')
+                            for item in report.get('checks', []) if isinstance(item, dict))
+        raise ValueError('Validação de assinatura recusada. ' + (details or 'O PowerShell não conseguiu concluir a consulta.'))
+
 
 
 def main():
