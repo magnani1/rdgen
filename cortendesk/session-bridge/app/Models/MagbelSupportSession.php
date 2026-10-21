@@ -65,7 +65,7 @@ class MagbelSupportSession extends Model
         // O estado é persistido na VPS; não depende da aba nem do DietPi.
         $token = ApiToken::find($this->token_id);
         $allowed = $token && self::integrationGroup($token) === $this->device_group;
-        if ((!$allowed || $this->expires_at->isPast()) && $this->disconnect_requested_at === null) {
+        if ((!$allowed || $this->expires_at->isPast() || $this->closed_reported_at !== null) && $this->disconnect_requested_at === null) {
             static::query()->whereKey($this->id)->whereNull('disconnect_requested_at')
                 ->update(['disconnect_requested_at'=>now(), 'launch_hash'=>null]);
             $this->refresh();

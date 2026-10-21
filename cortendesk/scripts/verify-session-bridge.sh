@@ -21,7 +21,7 @@ docker exec -u www-data -w /app "$CORTEN_CONTAINER" php artisan schedule:list --
 docker exec -u www-data -w /app "$CORTEN_CONTAINER" php -r '
 require "vendor/autoload.php"; $app=require "bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 if(!Illuminate\Support\Facades\Schema::hasTable("magbel_support_sessions")){exit(1);}
-if(config("magbel-support.token_groups")!==["facilitador-tjpb-sessoes"=>"TJPB"]){fwrite(STDERR,"Confira MAGBEL_SESSION_TOKEN_GROUPS: mapeamento diferente do piloto TJPB.\n");exit(1);}
+if((config("magbel-support.token_groups")["facilitador-tjpb-sessoes"] ?? null)!=="TJPB"){fwrite(STDERR,"Confira MAGBEL_SESSION_TOKEN_GROUPS: mapeamento diferente do piloto TJPB.\n");exit(1);}
 echo "Tabela e mapeamento TJPB da ponte: OK\n";
 '
 printf 'Confirme que o scheduler do contêiner está executando; a lista deve incluir magbel-support-expiry / magbel:sessions:sweep.\n'
