@@ -99,7 +99,7 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
  else {$Config | Add-Member -NotePropertyName AGENT_RUN_AS_SID -NotePropertyValue $Sid}
  $ConfigTemp=Join-Path $Root "config-migration-$Stamp.tmp"
  [IO.File]::WriteAllText($ConfigTemp,($Config | ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))
- [IO.File]::Replace($ConfigTemp,$ConfigPath,$null)
+ [IO.File]::Replace($ConfigTemp,$ConfigPath,(Join-Path $Backup 'config-at-replace.json'))
  if ((Get-FileHash $Identity).Hash -ne $IdentityHash) {throw "Inscrição divergente: não iniciar. Backup: $Backup"}
  Start-ScheduledTask -TaskName $TaskName
  [pscustomobject]@{

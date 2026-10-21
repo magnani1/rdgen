@@ -41,6 +41,26 @@ try {& $Block $env:COMPUTERNAME $Credential 'requests>=2.32.3,<3'} catch {
  $Refused=$true
 }
 if (-not $Refused) {throw 'RunningTaskAccepted'}
+# Executa a expressão real de substituição em arquivos descartáveis sob PS5.1.
+$Replace=$Block.Ast.Find({param($Node)
+ $Node -is [Management.Automation.Language.InvokeMemberExpressionAst] -and
+ $Node.Member.Extent.Text -eq 'Replace' -and
+ $Node.Extent.Text.StartsWith('[IO.File]::Replace(')
+},$true)
+if (-not $Replace) {throw 'ConfigReplaceNotFound'}
+$Backup=Join-Path $env:TEMP ('magbel-replace-test-'+[guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($Backup) | Out-Null
+try {
+ $ConfigTemp=Join-Path $Backup 'config-new.tmp'
+ $ConfigPath=Join-Path $Backup 'config.json'
+ [IO.File]::WriteAllText($ConfigTemp,'new-config')
+ [IO.File]::WriteAllText($ConfigPath,'old-config')
+ & ([scriptblock]::Create($Replace.Extent.Text))
+ if ([IO.File]::ReadAllText($ConfigPath) -ne 'new-config') {throw 'ConfigNotReplaced'}
+ if ([IO.File]::ReadAllText((Join-Path $Backup 'config-at-replace.json')) -ne 'old-config') {throw 'PreviousConfigNotPreserved'}
+ if ([IO.File]::Exists($ConfigTemp)) {throw 'TemporaryConfigStillPresent'}
+ Write-Host 'PS5.1: substituição real do config preservou backup anterior: OK'
+} finally {[IO.Directory]::Delete($Backup,$true)}
 Write-Host 'PS5.1: tarefa em execução recusada antes de alterar arquivos, direitos ou tarefa: OK'
 '@
  $Encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Fixture))
