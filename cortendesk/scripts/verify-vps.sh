@@ -3,7 +3,7 @@ set -euo pipefail
 PACKAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CORTEN_CONTAINER="${CORTEN_CONTAINER:-suporte_remoto}"
 CORTEN_ROOT="${CORTEN_ROOT:-/opt/cortendesk}"
-python3 - "$PACKAGE_DIR/manifest.json" "$CORTEN_ROOT/branding-1.14.0/MAGBEL-MANIFEST.json" <<'PY' | docker exec -i -u www-data -w /app "$CORTEN_CONTAINER" php -r '
+python3 - "$PACKAGE_DIR/manifest.json" "$CORTEN_ROOT/branding-1.14.0/MAGBEL-MANIFEST.json" "$CORTEN_ROOT/session-bridge-1.0.0/MAGBEL-SESSION-MANIFEST.json" <<'PY' | docker exec -i -u www-data -w /app "$CORTEN_CONTAINER" php -r '
 $expected=json_decode(stream_get_contents(STDIN), true);
 if (!is_array($expected) || !$expected) {fwrite(STDERR,"Manifesto inválido\n");exit(1);}
 foreach($expected as $path=>$hash) {
@@ -14,6 +14,7 @@ foreach($expected as $path=>$hash) {
 echo "Arquivos ativos coincidem com a preparação: ".count($expected)." destinos.\n";
 '
 import json,sys
+from pathlib import Path
 manifest=json.load(open(sys.argv[1]));prepared=json.load(open(sys.argv[2]))['sha256']
 expected={'/app/'+i['upstream']:prepared[i['local']] for i in manifest['files']}
 for local,targets in {
@@ -24,6 +25,8 @@ for local,targets in {
     'icons/magbel-remote-256.png':['public/rdclient/logo.png'],
 }.items():
     for target in targets:expected['/app/'+target]=prepared[local]
+if Path(sys.argv[3]).is_file():
+    expected.update({'/app/'+name:value for name,value in json.load(open(sys.argv[3]))['sha256'].items()})
 print(json.dumps(expected))
 PY
 docker exec -u www-data -w /app "$CORTEN_CONTAINER" php -r '
