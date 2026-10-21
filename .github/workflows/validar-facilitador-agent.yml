@@ -28,7 +28,7 @@ jobs:
         run: |
           $tokens = $null
           $errors = $null
-          foreach ($file in @('facilitador-agent/instalar-agente.ps1','facilitador-agent/preparar-pacote-assinado.ps1')) {
+          foreach ($file in @('facilitador-agent/instalar-agente.ps1','facilitador-agent/preparar-pacote-assinado.ps1','facilitador-agent/gerenciar-frota.ps1')) {
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { $errors | Format-List; exit 1 }
           }

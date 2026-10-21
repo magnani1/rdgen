@@ -25,7 +25,7 @@ if (-not $Function) { throw 'Template do launcher não encontrado.' }
 . ([scriptblock]::Create($Function.Extent.Text))
 New-Item -ItemType Directory -Path $Destination | Out-Null
 # Lista explícita: não copia identidade, configuração, venv ou segredos.
-foreach ($File in @('instalar-agente.ps1','facilitador-agent.py','requirements.txt','README.md','INSTALACAO-DO-ZERO.md','ASSISTENTE-EXE.md')) {
+foreach ($File in @('instalar-agente.ps1','facilitador-agent.py','requirements.txt','README.md','INSTALACAO-DO-ZERO.md','ASSISTENTE-EXE.md','fleet_manager.py','setup_assistant.py','GERENCIAMENTO-FROTA.md')) {
     Copy-Item -LiteralPath (Join-Path $PackageSource $File) -Destination $Destination
 }
 Get-AgentLauncher | Set-Content (Join-Path $Destination 'run-agent.ps1') -Encoding utf8BOM
@@ -39,6 +39,19 @@ if ($AssistantExe) {
     $Signature=Set-AuthenticodeSignature -FilePath $ExeDestination -Certificate $Certificate -HashAlgorithm SHA256
     if ($Signature.Status -ne 'Valid') { throw 'Assinatura inválida do EXE. Não distribuir este pacote.' }
 }
+# O gerenciador assinado vincula os arquivos de runtime aos hashes aprovados na estação.
+$FleetHashes=@{}
+foreach ($File in @('instalar-agente.ps1','run-agent.ps1','facilitador-agent.py','requirements.txt','fleet_manager.py','setup_assistant.py')) {
+    $FleetHashes[$File]=(Get-FileHash -LiteralPath (Join-Path $Destination $File) -Algorithm SHA256).Hash
+}
+$HashesBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($FleetHashes | ConvertTo-Json -Compress)))
+$FleetTemplate=Get-Content -LiteralPath (Join-Path $PackageSource 'gerenciar-frota.ps1') -Raw -Encoding UTF8
+# Substitui somente a atribuição; a comparação defensiva com o marcador permanece.
+$FleetTemplate=$FleetTemplate.Replace("`$PackageHashesBase64='__MAGBEL_PACKAGE_HASHES__'", "`$PackageHashesBase64='$HashesBase64'")
+$FleetPath=Join-Path $Destination 'gerenciar-frota.ps1'
+$FleetTemplate | Set-Content -LiteralPath $FleetPath -Encoding utf8BOM
+$Signature=Set-AuthenticodeSignature -FilePath $FleetPath -Certificate $Certificate -HashAlgorithm SHA256
+if ($Signature.Status -ne 'Valid') { throw 'Assinatura do gerenciador de frota inválida. Não distribuir.' }
 $Manifest=Get-ChildItem -LiteralPath $Destination -File | Sort-Object Name | ForEach-Object {
     @{file=$_.Name; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}
 }

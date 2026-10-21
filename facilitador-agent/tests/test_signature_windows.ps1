@@ -49,8 +49,36 @@ except ValueError as error:
 else:raise AssertionError('Modified launcher accepted')
 '@ | python -
     if ($LASTEXITCODE -ne 0) { throw 'Signature integration test failed.' }
+    Write-Host 'CI: preparando pacote completo de frota com hashes assinados'
+    $FleetPackage=Join-Path $Root 'pacote-frota'
+    & (Join-Path $PSScriptRoot '..\preparar-pacote-assinado.ps1') -CertificateThumbprint $Certificate.Thumbprint -Destination $FleetPackage
+    $env:MAGBEL_FLEET_FIXTURE=$FleetPackage
+    @'
+import base64, json, os, pathlib, subprocess
+from importlib.util import spec_from_file_location, module_from_spec
+p=pathlib.Path(os.environ['MAGBEL_FLEET_FIXTURE'])
+spec=spec_from_file_location('setup',os.environ['MAGBEL_SIGNATURE_SOURCE'])
+setup=module_from_spec(spec);spec.loader.exec_module(setup)
+setup.verify_package('pwsh',p,p/'gerenciar-frota.ps1')
+# Nunca conecta ao domínio: substitui o único ponto de abertura da sessão.
+script="""function New-PSSession { throw 'CI_NO_NETWORK' }
+& (Join-Path $env:MAGBEL_FLEET_FIXTURE 'gerenciar-frota.ps1') -Mode Inspect -ComputerName magbel-ci-target -AgentId magbel-ci-target -HomeUrl https://facilitador.example.test -ScriptsRoot '\\\\server\\scripts$' -ClientId TJPB
+"""
+encoded=base64.b64encode(script.encode('utf-16le')).decode('ascii')
+def inspect():
+    result=subprocess.run(['pwsh','-NoProfile','-NonInteractive','-EncodedCommand',encoded],text=True,encoding='utf-8',capture_output=True,timeout=30)
+    reports=[json.loads(line.split(':',1)[1]) for line in result.stdout.splitlines() if line.startswith('MAGBEL_FLEET:')]
+    assert reports,(result.returncode,'missing fleet report')
+    return reports[-1]
+assert inspect()['phase']=='PowerShell.7-Kerberos','Pacote válido não passou na conferência local'
+with (p/'facilitador-agent.py').open('a',encoding='utf-8') as f:f.write('\n# altered transport\n')
+assert inspect()['phase']=='package','Runtime alterado não foi recusado antes da conexão'
+print('Pacote completo assinado aceito; runtime alterado bloqueado antes de qualquer conexão WinRM')
+'@ | python -
+    if ($LASTEXITCODE -ne 0) { throw 'Fleet package integration test failed.' }
+
 } finally {
-    Remove-Item Env:\MAGBEL_SIGNATURE_FIXTURE,Env:\MAGBEL_SIGNATURE_SOURCE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MAGBEL_SIGNATURE_FIXTURE,Env:\MAGBEL_SIGNATURE_SOURCE,Env:\MAGBEL_FLEET_FIXTURE -ErrorAction SilentlyContinue
     if ($Certificate) {
         & certutil.exe -delstore Root $Certificate.Thumbprint | Out-Null
         foreach ($Store in @('Cert:\CurrentUser\My')) {

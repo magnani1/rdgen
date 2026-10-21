@@ -13,6 +13,7 @@ param(
     [string]$CaBundle = '',
     [System.Management.Automation.PSCredential]$RunAsCredential,
     [switch]$RecreateVenv,
+    [System.Security.SecureString]$EnrollmentCode,
     [switch]$PromptRunAsCredential,
     [string]$RunAsUserName = '',
     [string]$SigningCertificateThumbprint = '',
@@ -168,7 +169,7 @@ if ($CaBundle) {
 $Config | ConvertTo-Json | Set-Content "$Root\config.json" -Encoding UTF8
 foreach ($Entry in $Config.GetEnumerator()) { [Environment]::SetEnvironmentVariable($Entry.Key, $Entry.Value, 'Process') }
 if (-not (Test-Path "$Root\identity.json")) {
-    $Code = Read-Host 'Código de inscrição do painel (válido 10 min)' -AsSecureString
+    $Code = if ($EnrollmentCode) { $EnrollmentCode } else { Read-Host 'Código de inscrição do painel (válido 10 min)' -AsSecureString }
     $Ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Code)
     try {
         $env:AGENT_ENROLLMENT_CODE = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($Ptr)
