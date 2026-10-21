@@ -1,0 +1,28 @@
+name: Validar agente Facilitador Windows
+on:
+  pull_request:
+    paths: ['facilitador-agent/**', '.github/workflows/validar-facilitador-agent.yml']
+  push:
+    branches: [master]
+    paths: ['facilitador-agent/**', '.github/workflows/validar-facilitador-agent.yml']
+permissions:
+  contents: read
+jobs:
+  validar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r facilitador-agent/requirements.txt
+      - run: python -m py_compile facilitador-agent/facilitador-agent.py
+      - run: python -m unittest discover -s facilitador-agent/tests -v
+      - shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'facilitador-agent/instalar-agente.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | Format-List; exit 1 }
