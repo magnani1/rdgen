@@ -53,6 +53,25 @@ else:raise AssertionError('Modified launcher accepted')
     $FleetPackage=Join-Path $Root 'pacote-frota'
     & (Join-Path $PSScriptRoot '..\preparar-pacote-assinado.ps1') -CertificateThumbprint $Certificate.Thumbprint -Destination $FleetPackage
 
+    # Regressão: executar a chamada Python real no parser nativo do Windows PowerShell 5.1.
+    $ProbeTokens=$null; $ProbeErrors=$null
+    $ProbeAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '..\gerenciar-frota.ps1'),[ref]$ProbeTokens,[ref]$ProbeErrors)
+    if ($ProbeErrors.Count) { throw 'Sintaxe do helper inválida.' }
+    $Probe=$ProbeAst.Find({param($Node)
+        $Node -is [Management.Automation.Language.AssignmentStatementAst] -and
+        $Node.Left.Extent.Text -eq '$Info' -and
+        $Node.Right.Extent.Text.Contains('import json,sys,struct')
+    },$true)
+    if (-not $Probe) { throw 'Sonda Python não encontrada.' }
+    $env:MAGBEL_PYTHON_PROBE_EXE=(Get-Command python).Source
+    $ProbeTest='$ErrorActionPreference="Stop"; $Python=$env:MAGBEL_PYTHON_PROBE_EXE; '+$Probe.Extent.Text+@'
+if ($LASTEXITCODE -ne 0 -or $Info.major -ne 3 -or $Info.minor -lt 12 -or $Info.bits -ne 64 -or -not $Info.executable) { throw 'Python probe failed in Windows PowerShell 5.1' }
+Write-Host 'Windows PowerShell 5.1: sonda Python real retornou JSON e arquitetura x64: OK'
+'@
+    $EncodedProbeTest=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ProbeTest))
+    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -EncodedCommand $EncodedProbeTest
+    if ($LASTEXITCODE -ne 0) { throw 'Regressão da sonda Python em Windows PowerShell 5.1.' }
+
     $RealHelper=Join-Path $FleetPackage 'gerenciar-frota.ps1'
     $HelperBackup=Join-Path $Root 'helper-original.ps1'
     Copy-Item -LiteralPath $RealHelper -Destination $HelperBackup
@@ -139,7 +158,7 @@ print('Pacote completo assinado aceito; runtime alterado bloqueado antes de qual
     if ($LASTEXITCODE -ne 0) { throw 'Fleet package integration test failed.' }
 
 } finally {
-    Remove-Item Env:\MAGBEL_SIGNATURE_FIXTURE,Env:\MAGBEL_SIGNATURE_SOURCE,Env:\MAGBEL_FLEET_FIXTURE,Env:\MAGBEL_BRIDGE_TEST_FUNCTION,Env:\MAGBEL_BRIDGE_TEST_PACKAGE,Env:\MAGBEL_BRIDGE_TEST_SIGNER,Env:\MAGBEL_BRIDGE_TEST_PWSH -ErrorAction SilentlyContinue
+    Remove-Item Env:\MAGBEL_PYTHON_PROBE_EXE,Env:\MAGBEL_SIGNATURE_FIXTURE,Env:\MAGBEL_SIGNATURE_SOURCE,Env:\MAGBEL_FLEET_FIXTURE,Env:\MAGBEL_BRIDGE_TEST_FUNCTION,Env:\MAGBEL_BRIDGE_TEST_PACKAGE,Env:\MAGBEL_BRIDGE_TEST_SIGNER,Env:\MAGBEL_BRIDGE_TEST_PWSH -ErrorAction SilentlyContinue
     if ($Certificate) {
         & certutil.exe -delstore Root $Certificate.Thumbprint | Out-Null
         foreach ($Store in @('Cert:\CurrentUser\My')) {
