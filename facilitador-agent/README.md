@@ -1,4 +1,4 @@
-# Facilitador Agent Windows 2.0.1
+# Facilitador Agent Windows 2.0.2
 
 Instalação limpa e assinatura sem chave privada nos APPs: [INSTALACAO-DO-ZERO.md](INSTALACAO-DO-ZERO.md). O modo `-SignedLauncherPath` usa um launcher distribuído já assinado; o comportamento de assinatura local descrito abaixo fica como compatibilidade para a estação que possui a chave.
 
@@ -129,3 +129,9 @@ Esperado: Python 3.14 no venv, versão do agente 2.0.1, usuário selecionado e L
 Usar a conta pessoal já validada é uma opção para o piloto. Para operação permanente, escolher uma identidade dedicada com os direitos necessários; se a conta usa senha e ela mudar, atualizar a credencial da tarefa. O instalador não adiciona grupos nem concede permissões nos destinos.
 
 Validação adicional em Windows: Python 3.12/3.14, rejeição de versão/arquitetura incompatíveis, seleção de credencial versus SYSTEM, launcher real com Unicode e propagação de exit code. Não registra tarefas reais nem testa WinRM de produção nos testes automatizados.
+
+## 2.0.2 — saída pelo painel
+
+Anuncia control_protocol=1 no heartbeat. Ao receber stop, deixa de consultar fila/inventário, confere ausência de trabalho local, comunica saída em /fila/stopped e encerra normalmente após os workers, com exit code zero. Falha na confirmação não encerra nem repete instalações. Requer backend com a operação administrativa de encerramento, que recusa reservas ativas/desconhecidas. Para pausar/retomar só pelo painel, usar Drenar/Ativar; depois de sair do processo será necessário iniciar a tarefa local. Não desabilita a tarefa AtStartup.
+
+Procedimento: https://github.com/magnani1/facilitador-core/blob/main/OPERACAO-ENCERRAMENTO-AGENTES.md . Atualizar o pacote preserva identity.json; não exige outro código de inscrição. O legado externo não é atualizado nem ganha suporte a esse protocolo.

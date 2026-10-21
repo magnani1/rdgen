@@ -15,7 +15,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.1"
+VERSION = "2.0.2"
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
 AGENT_TOKEN = ""
@@ -632,17 +632,24 @@ def heartbeat_loop():
             ready = probe["ready"] and time.time()-probe["at"] < 45
             diagnostic = probe["diagnostic"] if time.time()-probe["at"]<45 else "sonda não concluiu; novas entregas suspensas"
             with RUNNING_LOCK: running = dict(RUNNING)
-            data = api("POST", HOME_URL + "/fila/heartbeat", json={"ready": ready, "diagnostic": diagnostic, "version": VERSION, "capacity": MAX_WORKERS, "running": running}, timeout=20).json()
-            DESIRED = data["desired"] if ready else "drain"
+            data = api("POST", HOME_URL + "/fila/heartbeat", json={"ready": ready, "diagnostic": diagnostic, "version": VERSION, "capacity": MAX_WORKERS, "running": running, "control_protocol": 1}, timeout=20).json()
+            DESIRED = data["desired"] if ready or data["desired"] == "stop" else "drain"
             SERVER_SLOTS = data["slots"]
             CAPABILITIES = data["capabilities"]
             INVENTORY_WRITER = data["inventory_writer"]
             missing = set(running) - set(data["renewed"])
             if missing: print("[agent] reserva não renovada; NÃO repetir ações; confira reconciliação no painel")
         except Exception as e:
-            DESIRED = "drain"
+            if DESIRED != "stop": DESIRED = "drain"
             print(f"[agent] heartbeat indisponível: {type(e).__name__}")
         time.sleep(20)
+
+
+def comunicar_saida():
+    with RUNNING_LOCK:
+        if RUNNING: return False
+    result = api("POST", HOME_URL + "/fila/stopped", timeout=20).json()
+    return result.get("ok") is True and result.get("desired") == "stop"
 
 
 def loop():
@@ -654,6 +661,12 @@ def loop():
     last_inv = 0
     while True:
         try:
+            if DESIRED == "stop":
+                if comunicar_saida():
+                    EXEC_POOL.shutdown(wait=True)
+                    print("[agent] saída solicitada pelo painel; retomada exige iniciar a tarefa no Windows")
+                    return
+                time.sleep(2); continue
             if INVENTORY_WRITER and time.time() - last_inv > 60:
                 enviar_inventario(); last_inv = time.time()
             with RUNNING_LOCK: free = len(RUNNING) < min(MAX_WORKERS, SERVER_SLOTS)
