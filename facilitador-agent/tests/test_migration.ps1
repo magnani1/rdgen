@@ -10,7 +10,7 @@ function Invoke-Command {
  param($ComputerName,$Authentication,$ConfigurationName,$ArgumentList,$ScriptBlock)
  $MigrationTestState.Calls++
  if ($Authentication -ne 'Kerberos' -or $ConfigurationName -ne 'Microsoft.PowerShell') {throw 'IncorrectEndpoint'}
- if ($ArgumentList[1] -isnot [pscredential]) {throw 'CredentialNotInMemory'}
+ if ($ArgumentList.Count -eq 3 -and $ArgumentList[1] -isnot [pscredential]) {throw 'CredentialNotInMemory'}
  $MigrationTestState.Block=$ScriptBlock
 }
 try {
@@ -26,7 +26,16 @@ try {
  'requests>=2.32.3,<3' | Set-Content $Requirements
  & $Source -ComputerName $env:COMPUTERNAME -Credential $Credential -RequirementsPath $Requirements -ConfirmarDrenadoSemTrabalhos
  if ($MigrationTestState.Calls -ne 1) {throw 'MissingRemotePlan'}
- $env:MAGBEL_MIGRATION_TEST_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($MigrationTestState.Block.ToString()))
+ $Blocks=@($MigrationTestState.Block)
+ $ResumeSource=Join-Path $PSScriptRoot '..\retomar-config-agente.ps1'
+ $Failed=$false
+ try {& $ResumeSource -ComputerName $env:COMPUTERNAME -Account 'FIXTURE\service'} catch {$Failed=$true}
+ if (-not $Failed -or $MigrationTestState.Calls -ne 1) {throw 'ResumeWithoutConfirmationAccepted'}
+ & $ResumeSource -ComputerName $env:COMPUTERNAME -Account 'FIXTURE\service' -ConfirmarDrenadoSemTrabalhos
+ if ($MigrationTestState.Calls -ne 2) {throw 'MissingResumePlan'}
+ $Blocks+=@($MigrationTestState.Block)
+ foreach ($RemoteBlock in $Blocks) {
+ $env:MAGBEL_MIGRATION_TEST_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RemoteBlock.ToString()))
  $Fixture=@'
 $ErrorActionPreference='Stop'
 function Get-ScheduledTask {param($TaskName) return @{State='Running'}}
@@ -66,6 +75,7 @@ Write-Host 'PS5.1: tarefa em execução recusada antes de alterar arquivos, dire
  $Encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Fixture))
  & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -EncodedCommand $Encoded
  if ($LASTEXITCODE -ne 0) {throw 'NativeMigrationGuardFailed'}
+ }
  Write-Host 'Migração: confirmação, manifest, credencial em memória e bloqueio de tarefa em execução: OK'
 } finally {
  Remove-Item Env:\MAGBEL_MIGRATION_TEST_BLOCK -ErrorAction SilentlyContinue
