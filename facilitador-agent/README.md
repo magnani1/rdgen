@@ -1,5 +1,7 @@
 # Facilitador Agent Windows 2.0.1
 
+Instalação limpa e assinatura sem chave privada nos APPs: [INSTALACAO-DO-ZERO.md](INSTALACAO-DO-ZERO.md). O modo `-SignedLauncherPath` usa um launcher distribuído já assinado; o comportamento de assinatura local descrito abaixo fica como compatibilidade para a estação que possui a chave.
+
 Executor Windows do Facilitador, separado do repositório do backend. Adaptado do agente fornecido pelo operador para identidade individual, limite de vagas, heartbeat e prontidão independentes, ownership da tentativa, drain e caminhos configuráveis.
 
 Requer backend com `/fila/enroll` e `/fila/heartbeat` (entrega agentes/contratos/suporte de 21/10/2026), Python 3.12+ x64 (3.14 x64 recomendado para novas instalações), PowerShell 7, RSAT para autenticação/AD e os direitos efetivos das ações executadas. O instalador não concede esses direitos.
@@ -63,7 +65,7 @@ Novos parâmetros: `-RunAsCredential <PSCredential>`, `-RecreateVenv`, `-Signing
 
 Python e PowerShell usam UTF-8 explícito; o log novo tem BOM para leitores antigos. O log anterior é arquivado em Logs. A correção não reinterpreta nem reescreve o histórico já corrompido.
 
-Se o instalador estiver assinado, procura a mesma identidade de certificado com chave privada no CurrentUser/My ou LocalMachine/My e assina o launcher gerado. Pode-se informar outro thumbprint explicitamente. A cadeia e o publicador precisam ser confiáveis no contexto da tarefa. Não modifica ExecutionPolicy nem importa certificados de confiança automaticamente.
+Sem `-SignedLauncherPath`, se o instalador estiver assinado, procura a mesma identidade de certificado com chave privada no CurrentUser/My ou LocalMachine/My e assina o launcher gerado. Pode-se informar outro thumbprint explicitamente. A cadeia e o publicador precisam ser confiáveis no contexto da tarefa. Não modifica ExecutionPolicy nem importa certificados de confiança automaticamente.
 
 ### Atualizar APP2 com a conta já testada
 
