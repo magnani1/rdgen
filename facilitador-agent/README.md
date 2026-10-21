@@ -135,3 +135,7 @@ Validação adicional em Windows: Python 3.12/3.14, rejeição de versão/arquit
 Anuncia control_protocol=1 no heartbeat. Ao receber stop, deixa de consultar fila/inventário, confere ausência de trabalho local, comunica saída em /fila/stopped e encerra normalmente após os workers, com exit code zero. Falha na confirmação não encerra nem repete instalações. Requer backend com a operação administrativa de encerramento, que recusa reservas ativas/desconhecidas. Para pausar/retomar só pelo painel, usar Drenar/Ativar; depois de sair do processo será necessário iniciar a tarefa local. Não desabilita a tarefa AtStartup.
 
 Procedimento: https://github.com/magnani1/facilitador-core/blob/main/OPERACAO-ENCERRAMENTO-AGENTES.md . Atualizar o pacote preserva identity.json; não exige outro código de inscrição. O legado externo não é atualizado nem ganha suporte a esse protocolo.
+
+## Instalação central de novos APPs
+
+Use o [gerenciador Python de frota](GERENCIAMENTO-FROTA.md) para conferir destinos e instalar pacote institucional assinado via WinRM. Comece pelo APP3; sem `--apply` a consulta não altera máquinas. A primeira versão preserva instalações existentes e não substitui atualização com drenagem.
