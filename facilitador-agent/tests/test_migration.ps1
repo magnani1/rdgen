@@ -5,28 +5,28 @@ $Source=Join-Path $PSScriptRoot '..\migrar-conta-agente.ps1'
 $Root=Join-Path $env:TEMP ('magbel-migration-test-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $Root | Out-Null
 $Credential=[pscredential]::new('FIXTURE\service',(ConvertTo-SecureString 'fixture-only' -AsPlainText -Force))
-$script:RemoteCalls=0
+$MigrationTestState=@{Calls=0;Block=$null}
 function Invoke-Command {
  param($ComputerName,$Authentication,$ConfigurationName,$ArgumentList,$ScriptBlock)
- $script:RemoteCalls++
+ $MigrationTestState.Calls++
  if ($Authentication -ne 'Kerberos' -or $ConfigurationName -ne 'Microsoft.PowerShell') {throw 'IncorrectEndpoint'}
  if ($ArgumentList[1] -isnot [pscredential]) {throw 'CredentialNotInMemory'}
- $script:RemoteBlock=$ScriptBlock
+ $MigrationTestState.Block=$ScriptBlock
 }
 try {
  $Requirements=Join-Path $Root 'requirements.txt'
  'requests>=2.32.3,<3' | Set-Content $Requirements
  $Failed=$false
  try {& $Source -ComputerName $env:COMPUTERNAME -Credential $Credential -RequirementsPath $Requirements} catch {$Failed=$true}
- if (-not $Failed -or $script:RemoteCalls) {throw 'MissingDrainConfirmationAccepted'}
+ if (-not $Failed -or $MigrationTestState.Calls) {throw 'MissingDrainConfirmationAccepted'}
  'requests @ https://invalid.example/unsafe.whl' | Set-Content $Requirements
  $Failed=$false
  try {& $Source -ComputerName $env:COMPUTERNAME -Credential $Credential -RequirementsPath $Requirements -ConfirmarDrenadoSemTrabalhos} catch {$Failed=$true}
- if (-not $Failed -or $script:RemoteCalls) {throw 'UnexpectedManifestAccepted'}
+ if (-not $Failed -or $MigrationTestState.Calls) {throw 'UnexpectedManifestAccepted'}
  'requests>=2.32.3,<3' | Set-Content $Requirements
  & $Source -ComputerName $env:COMPUTERNAME -Credential $Credential -RequirementsPath $Requirements -ConfirmarDrenadoSemTrabalhos
- if ($script:RemoteCalls -ne 1) {throw 'MissingRemotePlan'}
- $env:MAGBEL_MIGRATION_TEST_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script:RemoteBlock.ToString()))
+ if ($MigrationTestState.Calls -ne 1) {throw 'MissingRemotePlan'}
+ $env:MAGBEL_MIGRATION_TEST_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($MigrationTestState.Block.ToString()))
  $Fixture=@'
 $ErrorActionPreference='Stop'
 function Get-ScheduledTask {param($TaskName) return @{State='Running'}}
