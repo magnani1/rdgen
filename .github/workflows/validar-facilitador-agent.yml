@@ -51,6 +51,7 @@ jobs:
           if (-not (Test-Path 'dist-assistant/Magbel-Facilitador-Setup.exe')) { throw 'EXE não foi produzido.' }
           Get-FileHash dist-assistant/Magbel-Facilitador-Setup.exe -Algorithm SHA256 | Format-List
       - shell: pwsh
+        timeout-minutes: 3
         run: ./facilitador-agent/tests/test_signature_windows.ps1 -AssistantExe dist-assistant/Magbel-Facilitador-Setup.exe
       - uses: actions/upload-artifact@v4
         with:
