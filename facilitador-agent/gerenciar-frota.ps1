@@ -107,7 +107,7 @@ try {
             $Pwsh=Get-Command pwsh -ErrorAction SilentlyContinue
             $PwshPath=if ($Pwsh) { $Pwsh.Source } else { Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe' }
             if (-not (Test-Path -LiteralPath $PwshPath -PathType Leaf)) { throw 'LocalPowerShell7Required' }
-            $Info=(& $Python -c 'import json,sys,struct; print(json.dumps(dict(major=sys.version_info.major,minor=sys.version_info.minor,bits=struct.calcsize("P")*8,executable=sys.executable)))') | ConvertFrom-Json
+            $Info=(& $Python -c 'import json,sys,struct; print(json.dumps(dict(major=sys.version_info.major,minor=sys.version_info.minor,bits=struct.calcsize(chr(80))*8,executable=sys.executable)))') | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or $Info.major -ne 3 -or $Info.minor -lt 12 -or $Info.bits -ne 64) { throw 'Python312PlusX64Required' }
             $Root=Join-Path $env:ProgramData "Magbel\FacilitadorAgent\$Id"
             @{ok=$true;python="$($Info.major).$($Info.minor) x64";python_exe=$Info.executable;pwsh_exe=$PwshPath;existing_task=[bool](Get-ScheduledTask -TaskName "Magbel-Facilitador-$Id" -ErrorAction SilentlyContinue);existing_runtime=(Test-Path -LiteralPath $Root)}
