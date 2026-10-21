@@ -13,7 +13,7 @@ Instala apenas máquinas sem runtime/tarefa existente. Recusa APP1/APP2 se já i
 ## Pré-requisitos
 
 - Administrador: Windows, PowerShell 7 e Python 3.12+ x64 com `requests`; conta de domínio autorizada para WinRM. Não usa token de proprietário ou CortenDesk.
-- Destinos: PowerShell 7, endpoint WinRM **PowerShell.7**, Python 3.12+ x64 acessível à conta da tarefa, cadeia de assinatura confiável, acesso HTTPS ao Facilitador/PyPI e permissões UNC/WinRM da conta de execução. Recomenda-se Python 3.14 x64 instalado para todos os usuários.
+- Destinos: PowerShell 7, endpoint WinRM padrão **Microsoft.PowerShell**, Python 3.12+ x64 acessível à conta da tarefa, cadeia de assinatura confiável, acesso HTTPS ao Facilitador/PyPI e permissões UNC/WinRM da conta de execução. Recomenda-se Python 3.14 x64 instalado para todos os usuários.
 - O gerenciador não instala pré-requisitos nem altera TrustedHosts, CredSSP, políticas de execução, confiança de certificados, firewall ou permissões do domínio.
 - O pacote deve ter sido preparado na estação de assinatura. Não executar o helper não preparado do checkout.
 
@@ -28,13 +28,16 @@ Invoke-Command -ComputerName facilitadorapp3 -Authentication Kerberos {
 }
 ```
 
-Se PowerShell 7 estiver instalado e o endpoint não existir, a preparação autorizada no APP é executar **dentro do PowerShell 7**, como administrador:
+O gerenciador usa o endpoint padrão `Microsoft.PowerShell`, inclusive quando ele executa Windows PowerShell 5.1. A instalação é executada em um processo PowerShell 7 local no APP. Não é necessário registrar `PowerShell.7`, reiniciar WinRM ou alterar regras de firewall para usar esta entrega. As assinaturas e os hashes são conferidos no destino antes de iniciar esse processo.
+
+Se uma tentativa anterior de `Enable-PSRemoting` interrompeu a sessão, conferir primeiro a recuperação do serviço:
 
 ```powershell
-Enable-PSRemoting -Force
+Test-NetConnection facilitadorapp3.tjpb.jus.br -Port 5985
+Test-WSMan facilitadorapp3.tjpb.jus.br -Authentication Kerberos
 ```
 
-Isso registra o endpoint da versão que executa o comando e pode configurar regras de firewall. Aplique conforme a política institucional; o gerenciador não faz essa alteração. Consulte a documentação Microsoft de [Enable-PSRemoting](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/enable-psremoting) e [segundo salto](https://learn.microsoft.com/powershell/scripting/security/remoting/ps-remoting-second-hop).
+Caso continue inacessível, conferir no console/RDP do APP o serviço `WinRM` e seus listeners, iniciando o serviço apenas se estiver parado. Não abrir regras de firewall amplas nem alterar TrustedHosts para contornar o diagnóstico. `Enable-PSRemoting` pode reiniciar o serviço, interrompendo a sessão que o executa. Referências: [Enable-PSRemoting](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/enable-psremoting) e [segundo salto](https://learn.microsoft.com/powershell/scripting/security/remoting/ps-remoting-second-hop).
 
 ## Preparar pacote na estação que tem a chave privada
 
@@ -83,7 +86,7 @@ py -3.14 -m venv C:\Magbel\frota-venv
     --python-exe 'C:\Program Files\Python314\python.exe'
 ```
 
-O caminho de Python é do APP, não do computador administrador. Ajustar ao caminho real disponível à conta da tarefa. A consulta exibe a versão e se há runtime/tarefa existente. Problema na etapa `PowerShell.7-Kerberos` exige conferir endpoint, DNS/SPN, WinRM e permissões.
+O caminho de Python é do APP, não do computador administrador. Ajustar ao caminho real disponível à conta da tarefa. A consulta exibe a versão e se há runtime/tarefa existente. Problema na etapa `Microsoft.PowerShell-Kerberos` exige conferir DNS/SPN, serviço WinRM, listener, rede e permissões. Não exige registrar um endpoint PowerShell 7.
 
 Após conferência aprovada:
 
@@ -95,7 +98,7 @@ Após conferência aprovada:
     --slots 2 --apply --activate
 ```
 
-O gerenciador solicita usuário/senha/MFA do Facilitador e depois a conta/senha para executar a tarefa. A sessão é própria e encerrada ao final. A credencial WinRM é a conta de domínio do processo administrador; a senha solicitada para a tarefa pode ser de outra conta autorizada. O Windows armazena a credencial da tarefa pelo mecanismo do Agendador, como na instalação individual. O gerenciador não cria arquivo de senha, token ou inscrição; usa memória e pipe local e transmite PSCredential/SecureString pela sessão Kerberos.
+O gerenciador solicita usuário/senha/MFA do Facilitador e depois a conta/senha para executar a tarefa. A sessão é própria e encerrada ao final. A credencial WinRM é a conta de domínio do processo administrador; a senha solicitada para a tarefa pode ser de outra conta autorizada. O Windows armazena a credencial da tarefa pelo mecanismo do Agendador, como na instalação individual. O gerenciador não cria arquivo de senha, token ou inscrição; usa memória e pipe local e transmite os dados pela sessão Kerberos autenticada e cria PSCredential/SecureString dentro do processo local de instalação. O salto entre o host WinRM 5.1 e o PowerShell 7 local usa pipe anônimo em memória, sem senha em argumentos ou arquivos. Base64 no pipe serve somente à codificação, não à criptografia.
 
 Para mais destinos, informar nomes explicitamente, por exemplo `--hosts facilitadorapp3.tjpb.jus.br facilitadorapp4.tjpb.jus.br`. Os IDs são os nomes curtos em minúsculas. Não são aceitos IPs, curingas ou duplicatas. A execução é sequencial para não criar pico de instalação ou consumir inscrições antes da hora. Ajustar `--home-url`, `--client-id` e `--scripts-root` para outro cliente somente após provisionar seu portal separado.
 
@@ -109,4 +112,11 @@ Para mais destinos, informar nomes explicitamente, por exemplo `--hosts facilita
 
 ## Verificação desta entrega
 
-Testes automatizados cobrem validação de destinos/contrato, preservação de instalações existentes, transporte sem segredo no argv e recusa de prontidão insuficiente. CI Windows verifica sintaxe PowerShell e preparação/assinatura do pacote. Os testes não acessam as máquinas do domínio; o primeiro aceite real deve ser no APP3. Atualização de agentes existentes e EXE próprio de gerenciamento de frota permanecem etapas futuras.
+Testes automatizados cobrem validação de destinos/contrato, preservação de instalações existentes, transporte sem segredo no argv e recusa de prontidão insuficiente. CI Windows verifica sintaxe PowerShell, preparação/assinatura do pacote e a ponte de processo Windows PowerShell 5.1 → PowerShell 7 com dados fictícios, sem conexão ao domínio. Os testes não acessam as máquinas do domínio; o primeiro aceite real deve ser no APP3. Atualização de agentes existentes e EXE próprio de gerenciamento de frota permanecem etapas futuras.
+
+
+## Pacotes anteriores
+
+O pacote `frota-20261021-181703` usa o helper anterior que exigia endpoint PowerShell.7. Preserve-o para referência; para esta versão, atualize o Git e prepare outra pasta de pacote assinada. Não editar o helper dentro de um pacote já assinado. Nenhuma reinstalação dos APP1/APP2 ou mudança de credenciais é necessária.
+
+Caminhos `smb://usuario@servidor/...` são endereços de navegação SMB. No gerenciador e nos scripts Windows, usar UNC (`\\facilitador.tjpb.jus.br\facilitador_storage$\Scripts`) e a identidade da tarefa para acesso. A credencial SMB não escolhe o endpoint WinRM. Arquivos SecureString/DPAPI antigos não são copiados automaticamente: sem chave explícita, sua utilização está vinculada ao contexto que os protegeu. Não publicar arquivos de credenciais no Git.
