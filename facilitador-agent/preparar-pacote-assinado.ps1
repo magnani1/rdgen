@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$CertificateThumbprint,
-    [Parameter(Mandatory)][string]$Destination
+    [Parameter(Mandatory)][string]$Destination,
+    [string]$AssistantExe = ''
 )
 $ErrorActionPreference = 'Stop'
 $PackageSource = $PSScriptRoot
@@ -24,13 +25,19 @@ if (-not $Function) { throw 'Template do launcher não encontrado.' }
 . ([scriptblock]::Create($Function.Extent.Text))
 New-Item -ItemType Directory -Path $Destination | Out-Null
 # Lista explícita: não copia identidade, configuração, venv ou segredos.
-foreach ($File in @('instalar-agente.ps1','facilitador-agent.py','requirements.txt','README.md','INSTALACAO-DO-ZERO.md')) {
+foreach ($File in @('instalar-agente.ps1','facilitador-agent.py','requirements.txt','README.md','INSTALACAO-DO-ZERO.md','ASSISTENTE-EXE.md')) {
     Copy-Item -LiteralPath (Join-Path $PackageSource $File) -Destination $Destination
 }
 Get-AgentLauncher | Set-Content (Join-Path $Destination 'run-agent.ps1') -Encoding utf8BOM
 foreach ($File in @('instalar-agente.ps1','run-agent.ps1')) {
     $Signature=Set-AuthenticodeSignature -FilePath (Join-Path $Destination $File) -Certificate $Certificate -HashAlgorithm SHA256
     if ($Signature.Status -ne 'Valid') { throw "Assinatura inválida de ${File}: $($Signature.Status). Não distribuir este pacote." }
+}
+if ($AssistantExe) {
+    $ExeDestination=Join-Path $Destination 'Magbel-Facilitador-Setup.exe'
+    Copy-Item -LiteralPath $AssistantExe -Destination $ExeDestination
+    $Signature=Set-AuthenticodeSignature -FilePath $ExeDestination -Certificate $Certificate -HashAlgorithm SHA256
+    if ($Signature.Status -ne 'Valid') { throw 'Assinatura inválida do EXE. Não distribuir este pacote.' }
 }
 $Manifest=Get-ChildItem -LiteralPath $Destination -File | Sort-Object Name | ForEach-Object {
     @{file=$_.Name; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}

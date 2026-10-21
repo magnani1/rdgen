@@ -13,6 +13,8 @@ param(
     [string]$CaBundle = '',
     [System.Management.Automation.PSCredential]$RunAsCredential,
     [switch]$RecreateVenv,
+    [switch]$PromptRunAsCredential,
+    [string]$RunAsUserName = '',
     [string]$SigningCertificateThumbprint = '',
     [string]$SignedLauncherPath = '',
     [string]$PackageRoot = $PSScriptRoot
@@ -96,6 +98,12 @@ New-Item -ItemType Directory -Path $Root -Force | Out-Null
 # Proteção inicial; acesso de leitura da identidade selecionada é aplicado antes de iniciar a tarefa.
 & icacls.exe $Root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Não foi possível proteger o diretório.' }
+if ($PromptRunAsCredential) {
+    if ($RunAsCredential) { throw 'Escolha credencial fornecida ou solicitação interativa, não ambas.' }
+    if ($RunAsUserName) { $RunAsCredential = Get-Credential -UserName $RunAsUserName -Message 'Conta de execução do agente' }
+    else { $RunAsCredential = Get-Credential -Message 'Conta de execução do agente' }
+    if (-not $RunAsCredential) { throw 'Credencial cancelada; instalação interrompida.' }
+}
 $RunAsSid = if ($RunAsCredential) {
     ([System.Security.Principal.NTAccount]::new($RunAsCredential.UserName)).Translate([System.Security.Principal.SecurityIdentifier]).Value
 } else { 'S-1-5-18' }

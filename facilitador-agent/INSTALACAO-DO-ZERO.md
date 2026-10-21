@@ -112,7 +112,7 @@ Esperado: conta escolhida, LogonType Password, heartbeat e prontidão no painel.
 
 ## 7. Especificação do futuro assistente Python/EXE
 
-Ainda não há EXE produzido nesta entrega. Reutilizar o instalador testado e introduzir uma interface que:
+O assistente inicial foi implementado em setup_assistant.py, com build Windows e assinatura institucional separados; consulte ASSISTENTE-EXE.md. Ele ainda exige Python instalado para o executor. A evolução para um instalador completo deve:
 
 - detecta hostname, Windows x64, PowerShell, domínio e runtime acessível à conta definitiva;
 - seleciona perfil TJPB/TJPE com endereço HTTPS e origem aprovados, vagas e capacidades;

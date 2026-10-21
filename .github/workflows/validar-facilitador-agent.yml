@@ -34,3 +34,24 @@ jobs:
           }
       - shell: pwsh
         run: ./facilitador-agent/tests/test_installer.ps1
+  empacotar_assistente:
+    needs: validar
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r facilitador-agent/requirements-build.txt
+      - run: python -m PyInstaller --clean --noconfirm --onefile --windowed --uac-admin --name Magbel-Facilitador-Setup --distpath dist-assistant --workpath build-assistant facilitador-agent/setup_assistant.py
+      - shell: pwsh
+        run: |
+          if (-not (Test-Path 'dist-assistant/Magbel-Facilitador-Setup.exe')) { throw 'EXE não foi produzido.' }
+          Get-FileHash dist-assistant/Magbel-Facilitador-Setup.exe -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Magbel-Facilitador-Setup-nao-assinado
+          path: dist-assistant/Magbel-Facilitador-Setup.exe
+          retention-days: 14
