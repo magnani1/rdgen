@@ -139,3 +139,11 @@ de agendar 2.0.4 → 2.0.5 pelo painel. Esperar ausência de manutenção aberta
 fixa hashes de origem/destino; rollback mantém 2.0.4. Backend aceita anúncio antigo
 2.0.4 para conservar sondas, mas não lhe entrega operação 2.0.5. Manual completo:
 [OPERACAO-SESSOES-WINDOWS.md](https://github.com/magnani1/facilitador-core/blob/main/OPERACAO-SESSOES-WINDOWS.md).
+
+# Entrega 2.0.6: DisplayName nas sessões Windows
+
+O pacote 2.0.6 atualiza código homologado 2.0.5 para acrescentar DisplayName do AD às contas obtidas por WTS, mantendo a conta Windows. O helper fixa o hash de origem 2.0.5 e destino 2.0.6 e preserva o código anterior para rollback. Não atualiza Python, dependências, conta de execução nem inscrição.
+
+Atualize primeiro o backend; depois gere um novo pacote permanente assinado, confira que não há manutenção aberta, pare somente a tarefa `Magbel-Manutencao-manutencao-tjpb-app4` e use o atualizador do pacote. Não cadastre outro serviço. Confirme que o painel anuncia pacote 2.0.6 e atualize um agente pelo painel antes de ampliar. Novas consultas Windows com nomes exigem um agente 2.0.6 disponível.
+
+A resolução é em lote, restrita ao domínio AD do agente e às contas retornadas pelo Windows. Contas locais/outro domínio e falhas de AD mantêm apenas domínio/usuário. É necessário validar Get-ADDomain/Get-ADUser sob a conta de execução real; não há instalação automática de RSAT ou concessão de privilégios.

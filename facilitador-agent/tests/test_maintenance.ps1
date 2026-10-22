@@ -18,7 +18,7 @@ try {
     if ($Capture.Arguments.Count -ne 6) {throw 'UnexpectedTransport'}
     $Current=[Text.Encoding]::UTF8.GetString($Capture.Arguments[3])
     # Código sintético anterior para provar troca/rollback; o pin real é conferido separadamente.
-    $Old=$Current.Replace('VERSION = "2.0.5"','VERSION = "2.0.4"')
+    $Old=$Current.Replace('VERSION = "2.0.6"','VERSION = "2.0.5"')
     $env:MAGBEL_MAINT_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Capture.Block.ToString()))
     $env:MAGBEL_MAINT_NEW=[Convert]::ToBase64String($Capture.Arguments[3])
     $env:MAGBEL_MAINT_OLD=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Old))
