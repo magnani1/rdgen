@@ -37,7 +37,7 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
                     throw "Negação direta de consulta encontrada: $Terminal. Nenhuma negação será removida."
                 }
                 if ($Ace.AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessAllowed -and
-                    -not ($Ace.AceFlags -band [Security.AccessControl.AceFlags]::InheritOnly) -and ($Ace.AccessMask -band 1)) {$Present=$true}
+                    -not ([int]$Ace.AceFlags -band [int][Security.AccessControl.AceFlags]::InheritOnly) -and ($Ace.AccessMask -band 1)) {$Present=$true}
             }
         }
         if (-not $Present) {
@@ -46,7 +46,7 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
             $NewAce=[Security.AccessControl.CommonAce]::new([Security.AccessControl.AceFlags]::None,[Security.AccessControl.AceQualifier]::AccessAllowed,1,$Sid,$false,$null)
             $Index=$Sd.DiscretionaryAcl.Count
             for ($i=0;$i -lt $Sd.DiscretionaryAcl.Count;$i++) {
-                if ($Sd.DiscretionaryAcl[$i].AceFlags -band [Security.AccessControl.AceFlags]::Inherited) {$Index=$i;break}
+                if ([int]$Sd.DiscretionaryAcl[$i].AceFlags -band [int][Security.AccessControl.AceFlags]::Inherited) {$Index=$i;break}
             }
             $Sd.DiscretionaryAcl.InsertAce($Index,$NewAce)
         }
