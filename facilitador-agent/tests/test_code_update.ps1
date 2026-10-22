@@ -3,7 +3,7 @@
 $ErrorActionPreference='Stop'
 $Source=Join-Path $PSScriptRoot '..\atualizar-codigo-agente.ps1'
 $Agent=Join-Path $PSScriptRoot '..\facilitador-agent.py'
-$Temp=Join-Path $env:TEMP ('magbel-code-test-'+[guid]::NewGuid().ToString('N'))
+$Temp=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) ('Temp\magbel-code-test-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $Temp | Out-Null
 $State=@{Calls=0;Block=$null;Args=$null}
 function Get-AuthenticodeSignature {param($FilePath) [pscustomobject]@{Status='Valid'}}
