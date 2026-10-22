@@ -1,6 +1,6 @@
 import time, os, subprocess, requests, urllib3, json, base64, unicodedata, re
 import concurrent.futures
-import threading, shutil, sys, queue
+import threading, shutil, sys, queue, platform
 from pathlib import Path
 from contextvars import ContextVar
 from datetime import datetime
@@ -15,7 +15,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.2"
+VERSION = "2.0.3"
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
 AGENT_TOKEN = ""
@@ -624,6 +624,12 @@ def probe_loop():
         time.sleep(20)
 
 
+def runtime_versions():
+    return {"python_version": platform.python_version(),
+            "python_bits": sys.maxsize.bit_length() + 1,
+            "requests_version": requests.__version__}
+
+
 def heartbeat_loop():
     global DESIRED, SERVER_SLOTS, CAPABILITIES, INVENTORY_WRITER
     while True:
@@ -632,7 +638,7 @@ def heartbeat_loop():
             ready = probe["ready"] and time.time()-probe["at"] < 45
             diagnostic = probe["diagnostic"] if time.time()-probe["at"]<45 else "sonda não concluiu; novas entregas suspensas"
             with RUNNING_LOCK: running = dict(RUNNING)
-            data = api("POST", HOME_URL + "/fila/heartbeat", json={"ready": ready, "diagnostic": diagnostic, "version": VERSION, "capacity": MAX_WORKERS, "running": running, "control_protocol": 1}, timeout=20).json()
+            data = api("POST", HOME_URL + "/fila/heartbeat", json={"ready": ready, "diagnostic": diagnostic, "version": VERSION, "capacity": MAX_WORKERS, "running": running, "control_protocol": 1, **runtime_versions()}, timeout=20).json()
             DESIRED = data["desired"] if ready or data["desired"] == "stop" else "drain"
             SERVER_SLOTS = data["slots"]
             CAPABILITIES = data["capabilities"]
@@ -688,3 +694,4 @@ if __name__ == "__main__":
         print("Identidade inscrita; token salvo na pasta protegida.")
     else:
         loop()
+
