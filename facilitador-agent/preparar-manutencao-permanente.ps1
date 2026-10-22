@@ -11,7 +11,7 @@ foreach ($Store in @('Cert:\CurrentUser\My','Cert:\LocalMachine\My')) {
     if ($Item -and $Item.HasPrivateKey) {$Certificate=$Item;break}
 }
 if (-not $Certificate) {throw 'Chave privada não encontrada na estação de assinatura; não a exporte.'}
-foreach ($Name in @('instalar-manutencao-permanente.ps1','instalar-manutencao-remota.ps1','manutencao-agente.ps1')) {
+foreach ($Name in @('instalar-manutencao-permanente.ps1','instalar-manutencao-remota.ps1','manutencao-agente.ps1','atualizar-manutencao-permanente.ps1')) {
     $Tokens=$null;$Errors=$null
     [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $SourceRoot $Name),[ref]$Tokens,[ref]$Errors) | Out-Null
     if ($Errors.Count) {throw "Sintaxe inválida: $Name"}
@@ -35,4 +35,10 @@ $Remote=Join-Path $Destination 'instalar-manutencao-remota.ps1'
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'instalar-manutencao-remota.ps1') -Destination $Remote
 $Signature=Set-AuthenticodeSignature -FilePath $Remote -Certificate $Certificate -HashAlgorithm SHA256
 if ($Signature.Status -ne 'Valid') {throw 'Assinatura do instalador remoto não validada.'}
+$Updater=Get-Content -LiteralPath (Join-Path $SourceRoot 'atualizar-manutencao-permanente.ps1') -Raw -Encoding UTF8
+$Updater=$Updater.Replace("`$PackageHashesBase64='__MAGBEL_SERVICE_HASHES__'","`$PackageHashesBase64='$Encoded'")
+$TargetUpdater=Join-Path $Destination 'atualizar-manutencao-permanente.ps1'
+$Updater | Set-Content -LiteralPath $TargetUpdater -Encoding utf8BOM
+$Signature=Set-AuthenticodeSignature -FilePath $TargetUpdater -Certificate $Certificate -HashAlgorithm SHA256
+if ($Signature.Status -ne 'Valid') {throw 'Assinatura do atualizador não validada.'}
 Write-Host "Pacote permanente assinado: $Destination"
