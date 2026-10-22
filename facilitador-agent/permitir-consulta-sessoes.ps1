@@ -21,7 +21,8 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
     $Namespace='root\cimv2\TerminalServices'
     $Sid=([Security.Principal.NTAccount]::new($Account)).Translate([Security.Principal.SecurityIdentifier])
     $Plans=@()
-    foreach ($Terminal in @('Console','RDP-Tcp')) {
+    # A API documentada opera em listeners. Console não é tratado como listener RDP.
+    foreach ($Terminal in @('RDP-Tcp')) {
         $Stage='read_descriptor'
         $Item=Get-CimInstance -Namespace $Namespace -ClassName Win32_TSPermissionsSetting -Filter "TerminalName='$Terminal'"
         if (-not $Item -or -not $Item.StringSecurityDescriptor) {throw "Descritor indisponível: $Terminal"}
@@ -55,6 +56,60 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
     }
     $Backup=$null
     if ($Apply -and @($Plans | Where-Object Change).Count) {
+        $Stage='compile_listener_api'
+        if (-not ('MagbelListenerSecurity' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class MagbelListenerSecurity {
+ [StructLayout(LayoutKind.Sequential)] struct Luid { public uint Low; public int High; }
+ [StructLayout(LayoutKind.Sequential)] struct Privileges { public uint Count; public Luid Luid; public uint Attributes; }
+ [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
+ [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool LookupPrivilegeValue(string system,string name,out Luid luid);
+ [DllImport("advapi32.dll",SetLastError=true)] static extern bool AdjustTokenPrivileges(IntPtr token,bool disableAll,ref Privileges state,int length,out Privileges previous,out int needed);
+ [DllImport("wtsapi32.dll",EntryPoint="WTSGetListenerSecurityW",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern bool Get(IntPtr server,IntPtr reserved,uint flags,string listener,uint info,[Out] byte[] data,uint length,out uint needed);
+ [DllImport("wtsapi32.dll",EntryPoint="WTSSetListenerSecurityW",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern bool Set(IntPtr server,IntPtr reserved,uint flags,string listener,uint info,byte[] data);
+ // Habilita SeSecurityPrivilege temporariamente para preservar a SACL; restaura o estado anterior.
+ static T WithPrivilege<T>(Func<T> action) {
+  IntPtr token=IntPtr.Zero; Privileges previous=new Privileges(); bool restore=false;
+  try {
+   if(!OpenProcessToken(GetCurrentProcess(),0x28,out token)) throw new Win32Exception(Marshal.GetLastWin32Error());
+   Luid luid; if(!LookupPrivilegeValue(null,"SeSecurityPrivilege",out luid)) throw new Win32Exception(Marshal.GetLastWin32Error());
+   var state=new Privileges {Count=1,Luid=luid,Attributes=2}; int needed;
+   bool ok=AdjustTokenPrivileges(token,false,ref state,Marshal.SizeOf(typeof(Privileges)),out previous,out needed);
+   int error=Marshal.GetLastWin32Error(); restore=ok;
+   if(!ok || error!=0) throw new Win32Exception(error);
+   return action();
+  } finally {
+   if(token!=IntPtr.Zero) {
+    if(restore) {Privileges ignored;int needed;AdjustTokenPrivileges(token,false,ref previous,Marshal.SizeOf(typeof(Privileges)),out ignored,out needed);}
+    CloseHandle(token);
+   }
+  }
+ }
+ public static byte[] Read(string listener) {
+  return WithPrivilege<byte[]>(delegate {
+   uint needed; bool ok=Get(IntPtr.Zero,IntPtr.Zero,0,listener,12,null,0,out needed);
+   int error=Marshal.GetLastWin32Error();
+   if(!ok && error!=122) throw new Win32Exception(error);
+   if(needed==0 || needed>65536) throw new InvalidOperationException("ListenerDescriptorSize");
+   byte[] data=new byte[needed];
+   if(!Get(IntPtr.Zero,IntPtr.Zero,0,listener,12,data,(uint)data.Length,out needed)) throw new Win32Exception(Marshal.GetLastWin32Error());
+   return data;
+  });
+ }
+ public static void Write(string listener,byte[] data) {
+  WithPrivilege<bool>(delegate {
+   if(!Set(IntPtr.Zero,IntPtr.Zero,0,listener,12,data)) throw new Win32Exception(Marshal.GetLastWin32Error());
+   return true;
+  });
+ }
+}
+'@ -ErrorAction Stop
+        }
         $Stage='save_backup'
         $Folder=Join-Path $env:ProgramData ('Magbel\SessionQueryBackups\'+[guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $Folder -Force | Out-Null
@@ -65,14 +120,24 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
             $Stage='check_concurrent_change'
             $Item=Get-CimInstance -Namespace $Namespace -ClassName Win32_TSPermissionsSetting -Filter "TerminalName='$($Plan.Terminal)'"
             if ([string]$Item.StringSecurityDescriptor -cne $Plan.Before) {throw "Regra mudou durante a operação. Backup: $Backup"}
+            $Stage='read_listener_api'
+            $NativeBefore=[MagbelListenerSecurity]::Read($Terminal)
+            $NativeSd=[Security.AccessControl.RawSecurityDescriptor]::new($NativeBefore,0)
+            $OriginalSd=[Security.AccessControl.RawSecurityDescriptor]::new($Plan.Before)
+            $Sections=[Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Audit
+            if ($NativeSd.GetSddlForm($Sections) -cne $OriginalSd.GetSddlForm($Sections)) {throw "ACL nativa diverge da prévia. Backup: $Backup"}
+            [IO.File]::WriteAllBytes((Join-Path $Folder 'listener-before.bin'),$NativeBefore)
+            $DesiredSd=[Security.AccessControl.RawSecurityDescriptor]::new($Plan.After)
+            $NativeSd.DiscretionaryAcl=$DesiredSd.DiscretionaryAcl
+            $NativeAfter=[byte[]]::new($NativeSd.BinaryLength)
+            $NativeSd.GetBinaryForm($NativeAfter,0)
             $Stage='write_descriptor'
             $WriteAttempts+= $Terminal
-            $Item | Set-CimInstance -Property @{StringSecurityDescriptor=$Plan.After} | Out-Null
+            [MagbelListenerSecurity]::Write($Terminal,$NativeAfter)
             $Stage='verify_descriptor'
-            $Actual=Get-CimInstance -Namespace $Namespace -ClassName Win32_TSPermissionsSetting -Filter "TerminalName='$($Plan.Terminal)'"
-            $ActualSd=[Security.AccessControl.RawSecurityDescriptor]::new([string]$Actual.StringSecurityDescriptor)
-            $Wanted=[Security.AccessControl.RawSecurityDescriptor]::new($Plan.After)
-            if ($ActualSd.GetSddlForm([Security.AccessControl.AccessControlSections]::Access) -cne $Wanted.GetSddlForm([Security.AccessControl.AccessControlSections]::Access)) {
+            $ActualBytes=[MagbelListenerSecurity]::Read($Terminal)
+            $ActualSd=[Security.AccessControl.RawSecurityDescriptor]::new($ActualBytes,0)
+            if ($ActualSd.GetSddlForm($Sections) -cne $NativeSd.GetSddlForm($Sections)) {
                 throw "Conferência da DACL falhou em $($Plan.Terminal). Backup: $Backup"
             }
             $Verified+= $Terminal
