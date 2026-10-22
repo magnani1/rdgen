@@ -104,12 +104,12 @@ def patch_sources(texts, old_image, new_image, roots):
     return result
 
 
-def overlay(brand_root, bridge_root, manifest):
+def overlay(brand_root, bridge_root, manifest, bridge_manifest=None):
     result={'/app/'+f['upstream']:brand_root/f['local'] for f in manifest['files']}
     for name,targets in ASSETS.items():
         for target in targets: result['/app/'+target]=brand_root/name
     if bridge_root is not None:
-        for name in json.loads((bridge_root/'MAGBEL-SESSION-MANIFEST.json').read_text())['sha256']:
+        for name in json.loads(Path(bridge_manifest or bridge_root/'MAGBEL-SESSION-MANIFEST.json').read_text())['sha256']:
             result['/app/'+name]=bridge_root/name
     return result
 
@@ -270,7 +270,7 @@ class Updater:
         finally:
             for file in drafts: file.unlink(missing_ok=True)
         after_bindings=bindings(after_config['services'][self.service])
-        final_bridge_map=overlay(brand_dest,bridge_dest,manifest)
+        final_bridge_map=overlay(brand_dest,bridge_dest,manifest,prepared_bridge/'MAGBEL-SESSION-MANIFEST.json')
         if any(after_bindings.get(target)!=(str(path.resolve()),True) for target,path in final_bridge_map.items()): raise UpdateError('Compose não monta todos os destinos do branding/ponte novos como somente leitura.')
         comparable=copy.deepcopy(after_config)
         comparable['services'][self.service]['image']=before_config['services'][self.service]['image']

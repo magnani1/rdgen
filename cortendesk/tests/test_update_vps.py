@@ -11,6 +11,14 @@ import update_vps as update
 
 
 class UpdateTests(unittest.TestCase):
+    def test_future_overlay_uses_prepared_manifest_before_installation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);prepared=root/'prepared.json'
+            prepared.write_text(json.dumps({'sha256':{'bootstrap/providers.php':'fixture'}}))
+            result=update.overlay(root/'brand-future',root/'bridge-future',{'files':[]},prepared)
+            self.assertEqual(result['/app/bootstrap/providers.php'],root/'bridge-future/bootstrap/providers.php')
+            self.assertFalse((root/'bridge-future').exists())
+
     def test_portainer_internal_compose_resolves_to_host_volume(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);file=root/'compose/17/docker-compose.yml';file.parent.mkdir(parents=True);file.write_text('services: {}')
