@@ -11,7 +11,7 @@ if ((Get-AuthenticodeSignature -FilePath $PSCommandPath).Status -ne 'Valid') { t
 # Agente 2.0.3 revisado. Canonicalização: UTF-8 sem BOM, LF e uma quebra final.
 # A referência não é recebida do painel nem de um arquivo de hash não autenticado.
 $ExpectedHash = '3ad13e7facf6a493ecb647443b3a55e9e4c86bf3cbc371c20d56afadc7e462dc'
-$Text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).Path)
+$Text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).ProviderPath)
 $Text = $Text.Replace("`r`n", "`n").TrimEnd([char[]]"`r`n") + "`n"
 $Bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
 $Hasher = [Security.Cryptography.SHA256]::Create()
