@@ -6,7 +6,7 @@ Credencial de API exclusiva do serviço, independente do token dos agentes, do p
 
 ## 1. Backend no DietPi
 
-Atualize facilitador-core pelo Git, prepare a imagem e recrie as duas réplicas na stack existente. Preserve todas as variáveis. Não há variável nova para o serviço permanente. Recarregue nginx e execute os validadores de deploy e suporte. Frontend desta entrega: 20261022c. A inscrição do serviço fica no painel Agentes → Atualizações dos agentes → Cadastrar serviço permanente.
+Atualize facilitador-core pelo Git, prepare a imagem e recrie as duas réplicas na stack existente. Preserve todas as variáveis. Não há variável nova para o serviço permanente. Recarregue nginx e execute os validadores de deploy e suporte. Frontend desta entrega: 20261022d. A inscrição do serviço fica no painel Agentes → Atualizações dos agentes → Cadastrar serviço permanente.
 
 ## 2. Pré-requisitos no APP4
 
@@ -79,3 +79,42 @@ A nova rotina não atualiza o próprio serviço nem homologa versões externas a
 - Ao voltar ao conector interativo, aguarde operações terminarem, desative a tarefa permanente e inicie o conector anterior. Nenhuma credencial de agente precisa ser rotacionada por isso.
 
 Teste real de Windows/DPAPI, assinatura, Agendador e WinRM deve ser concluído no APP4. GitHub Actions bloqueado por cobrança não equivale a teste aprovado.
+
+## Atualização do conector com sondas de conectividade (20261022d)
+
+Implante primeiro o backend/painel `20261022d`. A entrega acrescenta uma tabela separada de diagnósticos, preservando o formato das tabelas anteriores para rollback do backend; conectores antigos continuam funcionando e aparecem como sem sonda recebida. Não é necessário cadastrar outro serviço, gerar código, trocar senha ou atualizar o agente 2.0.4.
+
+O novo conector confere um destino por vez em segundo plano, repetindo a rodada aproximadamente a cada dois minutos (pode demorar mais em falhas/timeout). Usa sua própria conta da tarefa, TCP 5985 e Microsoft.PowerShell/Kerberos. Lê somente a presença do token administrativo remoto: não lê arquivos, logs ou credenciais do agente e não altera firewall/permissões. O painel identifica origem, destino, horário, porta, autenticação e permissão separadamente; dados com mais de cinco minutos aparecem vencidos. A sonda não comprova a execução de scripts nem todo o conjunto de regras do firewall. Antes de atualizar um agente, faz outra sonda; se falhar, encerra a solicitação antes de tocar tarefa/código e mantém o destino drenado para conferência.
+
+Atualize o conector pela SEDE153729, em PowerShell 7. **Confirme antes no painel que todas as atualizações terminaram ou foram reconciliadas/canceladas e não existe conector interativo operando.** Não pare o serviço durante uma manutenção. O atualizador exige tarefa Ready e ausência de processos do conector/helper, confere o pacote atual, assina/fixa o novo, preserva tarefa, senha, DPAPI e venv; guarda o pacote e manifesto anteriores. Nenhum executor APP1–4 é parado por este procedimento.
+
+Execute o bloco inteiro, sem depender de variáveis de sessões anteriores:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$Repo = '\\facilitadorapp1\c$\Magbel\rdgen'
+git -C $Repo pull --ff-only
+if ($LASTEXITCODE -ne 0) { throw 'Git interrompido; preserve alterações locais.' }
+$Source = Join-Path $Repo 'facilitador-agent'
+$Stamp = (Get-Date -Format yyyyMMdd-HHmmss) + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
+$Preparador = Join-Path $env:TEMP ('magbel-preparar-sondas-' + $Stamp + '.ps1')
+$Pacote = Join-Path 'C:\Magbel\pacotes' ('manutencao-sondas-' + $Stamp)
+Copy-Item -LiteralPath (Join-Path $Source 'preparar-manutencao-permanente.ps1') -Destination $Preparador
+Sign-File $Preparador
+$Assinatura = Get-AuthenticodeSignature -LiteralPath $Preparador
+if ($Assinatura.Status -ne 'Valid') { throw 'Assinatura do preparador não validada.' }
+& $Preparador -SourceRoot $Source -Destination $Pacote -CertificateThumbprint $Assinatura.SignerCertificate.Thumbprint
+
+# Somente depois de confirmar no painel que não há manutenção aberta:
+Invoke-Command -ComputerName facilitadorapp4.tjpb.jus.br -Authentication Kerberos -ScriptBlock {
+    Stop-ScheduledTask -TaskName 'Magbel-Manutencao-manutencao-tjpb-app4'
+    Start-Sleep -Seconds 3
+    Get-ScheduledTask -TaskName 'Magbel-Manutencao-manutencao-tjpb-app4' | Select-Object TaskName,State
+}
+& (Join-Path $Pacote 'atualizar-manutencao-permanente.ps1') `
+    -ComputerName 'facilitadorapp4.tjpb.jus.br' -ServiceId 'manutencao-tjpb-app4'
+```
+
+O atualizador inicia a mesma tarefa após a troca. Confira `IdentityPreserved=True`, contato permanente e as sondas dos quatro destinos no painel. Se houver falha antes da troca, o serviço fica parado; examine a mensagem antes de iniciar a tarefa existente. Não repita uma inscrição.
+
+Backup: `C:\ProgramData\Magbel\Maintenance\manutencao-tjpb-app4\backups\<carimbo>\package-before` e `service-before.json`. Para rollback operacional após uma troca concluída: confirme novamente ausência de manutenção, pare somente a tarefa do conector, preserve o pacote atual, restaure **em conjunto** package-before como package e service-before.json como service.json, confira hashes e inicie a mesma tarefa. Não copie nem substitua identity.json, venv ou credenciais. Erro durante a troca de arquivos já restaura o pacote anterior e deixa a tarefa parada para conferência.

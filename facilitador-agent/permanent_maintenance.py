@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+import threading
 from urllib.parse import urlsplit
 
 import requests
@@ -73,13 +74,72 @@ class ServicePortal:
     def close(self):self.credential='';self.http.close()
 
 
+def probe_connectivity(host):
+    """Somente TCP e token remoto; nunca lê credenciais/configuração do agente."""
+    report={'hostname':host,'checked_at':int(time.time()),'tcp':None,'kerberos':None,'admin':None}
+    if not re.fullmatch(r'[a-z][a-z0-9-]{0,62}(?:\.[a-z0-9][a-z0-9-]{0,62})*',host):
+        raise FleetError('Destino de sonda inválido.')
+    try:
+        with socket.create_connection((host,5985),timeout=3):pass
+        report['tcp']=True
+    except OSError:
+        report['tcp']=False
+        return report
+    encoded_host=base64.b64encode(host.encode()).decode()
+    script=r"""
+$ErrorActionPreference='Stop'
+$HostName=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__HOST__'))
+try {
+    $Options=New-PSSessionOption -OpenTimeout 8000 -OperationTimeout 8000
+    $Admin=Invoke-Command -ComputerName $HostName -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -SessionOption $Options -ScriptBlock {
+        $Principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+        $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    @{kerberos=$true;admin=[bool]$Admin} | ConvertTo-Json -Compress
+} catch { @{kerberos=$false;admin=$null} | ConvertTo-Json -Compress }
+""".replace('__HOST__',encoded_host)
+    encoded=base64.b64encode(script.encode('utf-16-le')).decode()
+    try:
+        result=subprocess.run(['pwsh','-NoProfile','-NonInteractive','-EncodedCommand',encoded],capture_output=True,encoding='utf-8',errors='replace',timeout=25)
+        if result.returncode:return report
+        data=json.loads(result.stdout.lstrip('\ufeff').strip())
+        if not isinstance(data,dict):return report
+        if type(data.get('kerberos')) is bool:report['kerberos']=data['kerberos']
+        if report['kerberos'] is True and type(data.get('admin')) is bool:report['admin']=data['admin']
+    except (OSError,ValueError,subprocess.SubprocessError):pass
+    return report
+
+
 class PermanentController(Controller):
     def __init__(self, portal, identity, package, **kwargs):
         self.hostname=identity['hostname']
+        self.diagnostics={};self.probe_lock=threading.Lock();self.probe_thread=None
+        self.next_probe=0;self.probe_index=0
         super().__init__(portal,identity['hosts'],package,**kwargs)
 
+    def run_operation(self, op):
+        if op['hostname'] not in self.hosts or op['target_version']!=VERSION:
+            raise FleetError('Plano fora do escopo do serviço.')
+        report=probe_connectivity(op['hostname'])
+        with self.probe_lock:self.diagnostics[op['hostname']]=report
+        if not all(report[k] is True for k in ('tcp','kerberos','admin')):
+            self.progress(op,'failed')
+            print(op['agent_id']+': conferência WinRM recusada antes da troca; tarefa e código preservados. Confira as sondas no painel.',flush=True)
+            return
+        return super().run_operation(op)
+
     def announce(self):
-        return self.portal.call('POST','/admin/maintenance/controller',{'id':self.id,'hostname':self.hostname,'hosts':self.hosts,'versions':[VERSION]})
+        # Uma sonda por vez, em segundo plano: não bloqueia o heartbeat/manutenção.
+        if (self.probe_thread is None or not self.probe_thread.is_alive()) and self.clock()>=self.next_probe:
+            host=self.hosts[self.probe_index % len(self.hosts)];self.probe_index+=1
+            self.next_probe=self.clock()+max(5,120/len(self.hosts))
+            def collect():
+                try:report=probe_connectivity(host)
+                except Exception:return  # Sem stderr, tokens ou mensagens do WinRM no relatório.
+                with self.probe_lock:self.diagnostics[host]=report
+            self.probe_thread=threading.Thread(target=collect,daemon=True);self.probe_thread.start()
+        with self.probe_lock:reports=[dict(r) for r in self.diagnostics.values() if int(time.time())-r['checked_at']<=86400]
+        return self.portal.call('POST','/admin/maintenance/controller',{'id':self.id,'hostname':self.hostname,'hosts':self.hosts,'versions':[VERSION],'diagnostics':reports})
 
 
 def enroll(root, payload):
