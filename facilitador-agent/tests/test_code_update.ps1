@@ -7,6 +7,12 @@ $Temp=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) ('Temp\ma
 New-Item -ItemType Directory -Path $Temp | Out-Null
 $State=@{Calls=0;Block=$null;Args=$null}
 function Get-AuthenticodeSignature {param($FilePath) [pscustomobject]@{Status='Valid'}}
+# Reproduz Path qualificado pelo provider; ReadAllText deve usar ProviderPath.
+function Resolve-Path {
+    param($LiteralPath)
+    $Native=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($LiteralPath)
+    [pscustomobject]@{Path=('Microsoft.PowerShell.Core\FileSystem::'+$Native);ProviderPath=$Native}
+}
 function Invoke-Command {
     param($ComputerName,$Authentication,$ConfigurationName,$ArgumentList,$ScriptBlock)
     if ($Authentication -ne 'Kerberos' -or $ConfigurationName -ne 'Microsoft.PowerShell') {throw 'IncorrectEndpoint'}
