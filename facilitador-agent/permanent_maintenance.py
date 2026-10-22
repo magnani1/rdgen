@@ -109,6 +109,57 @@ try {
     except (OSError,ValueError,subprocess.SubprocessError):pass
     return report
 
+def probe_runtime(host):
+    """Consulta somente o ambiente configurado no runtime protegido do agente."""
+    if not re.fullmatch(r'[a-z][a-z0-9-]{0,62}(?:\.[a-z0-9][a-z0-9-]{0,62})*',host):raise FleetError('Destino inválido.')
+    encoded_host=base64.b64encode(host.encode()).decode()
+    script=r'''
+$ErrorActionPreference='Stop'
+$HostName=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__HOST__'))
+try {
+    $Options=New-PSSessionOption -OpenTimeout 8000 -OperationTimeout 20000
+    $Data=Invoke-Command -ComputerName $HostName -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -SessionOption $Options -ScriptBlock {
+        $ErrorActionPreference='Stop'
+        $Root=Join-Path $env:ProgramData ('Magbel\FacilitadorAgent\'+$env:COMPUTERNAME.ToLowerInvariant())
+        $ConfigPath=Join-Path $Root 'config.json'
+        if ((Get-Item -LiteralPath $ConfigPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'ConfigLink'}
+        $Config=Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $Python=[IO.Path]::GetFullPath([string]$Config.AGENT_PYTHON)
+        if (-not $Python.StartsWith(($Root.TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($Python) -ine 'python.exe') {throw 'RuntimeOutsideRoot'}
+        $Path=$Python
+        while ($Path -and $Path.StartsWith($env:ProgramData,[StringComparison]::OrdinalIgnoreCase)) {
+            if ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'RuntimeLink'}
+            $Path=Split-Path $Path -Parent
+        }
+        $Query=@'
+import importlib.metadata as m,json,platform,re,struct
+rows=[{'name':re.sub(r'[-_.]+','-',d.metadata.get('Name','')).lower(),'version':d.version} for d in m.distributions()]
+if not 1<=len(rows)<=256: raise RuntimeError('inventory_size')
+print(json.dumps({'python_version':platform.python_version(),'python_bits':struct.calcsize('P')*8,'implementation':platform.python_implementation(),'packages':sorted(rows,key=lambda x:x['name'])}))
+'@
+        $Output=& $Python -I -c $Query 2>$null
+        if ($LASTEXITCODE -ne 0) {throw 'MetadataQueryFailed'}
+        $Output | ConvertFrom-Json
+    }
+    $Data | ConvertTo-Json -Depth 5 -Compress
+} catch { 'null' }
+'''.replace('__HOST__',encoded_host)
+    encoded=base64.b64encode(script.encode('utf-16-le')).decode()
+    try:
+        result=subprocess.run(['pwsh','-NoProfile','-NonInteractive','-EncodedCommand',encoded],capture_output=True,encoding='utf-8',errors='replace',timeout=40)
+        if result.returncode:return None
+        data=json.loads(result.stdout.lstrip('\ufeff').strip())
+        if not isinstance(data,dict) or not re.fullmatch(r'\d{1,3}\.\d{1,3}\.\d{1,3}',str(data.get('python_version',''))) or type(data.get('python_bits')) is not int or data['python_bits'] not in (32,64) or data.get('implementation') not in ('CPython','PyPy'):return None
+        packages=data.get('packages')
+        if not isinstance(packages,list) or not 1<=len(packages)<=256:return None
+        clean=[]
+        for item in packages:
+            if not isinstance(item,dict) or not isinstance(item.get('name'),str) or not isinstance(item.get('version'),str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,127}',item['name']) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.!+_-]{0,127}',item['version']):return None
+            clean.append({'name':item['name'],'version':item['version']})
+        if len({p['name'] for p in clean})!=len(clean):return None
+        return {**{k:data[k] for k in ('python_version','python_bits','implementation')},'packages':clean}
+    except (OSError,ValueError,subprocess.SubprocessError):return None
+
 
 class PermanentController(Controller):
     def __init__(self, portal, identity, package, **kwargs):
@@ -134,7 +185,9 @@ class PermanentController(Controller):
             host=self.hosts[self.probe_index % len(self.hosts)];self.probe_index+=1
             self.next_probe=self.clock()+max(5,120/len(self.hosts))
             def collect():
-                try:report=probe_connectivity(host)
+                try:
+                    report=probe_connectivity(host)
+                    if report.get('admin') is True:report['runtime']=probe_runtime(host)
                 except Exception:return  # Sem stderr, tokens ou mensagens do WinRM no relatório.
                 with self.probe_lock:self.diagnostics[host]=report
             self.probe_thread=threading.Thread(target=collect,daemon=True);self.probe_thread.start()
