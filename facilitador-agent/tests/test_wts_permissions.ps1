@@ -2,6 +2,10 @@
 # Executar no Windows: testa o bloco remoto real com CIM simulado, sem modificar ACLs.
 $ErrorActionPreference='Stop'
 $Path=Join-Path (Split-Path $PSScriptRoot) 'permitir-consulta-sessoes.ps1'
+$Source=[IO.File]::ReadAllText($Path)
+$Definition=[regex]::Match($Source,"(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@")
+if (-not $Definition.Success) {throw 'Wrapper da API não encontrado.'}
+if (-not ('MagbelListenerSecurity' -as [type])) {Add-Type -TypeDefinition $Definition.Groups[1].Value -ErrorAction Stop}
 $Tokens=$null;$Errors=$null
 $Ast=[Management.Automation.Language.Parser]::ParseFile($Path,[ref]$Tokens,[ref]$Errors)
 if ($Errors.Count) {throw 'Falha no parser PowerShell.'}
@@ -20,9 +24,9 @@ function Export-Clixml {throw 'Teste somente leitura tentou criar backup.'}
 # Flags AceFlags sem herança: regressão da conversão enum/bitwise no PowerShell 5.1.
 $script:Descriptor='O:SYG:SYD:(A;;0xf03bf;;;SY)(A;;0xf03bf;;;BA)'
 $Rows=@(& $Remote $Account $false)
-if ($Rows.Count -ne 2 -or @($Rows | Where-Object {-not $_.ChangeNeeded -or $_.Applied}).Count) {throw 'Prévia sem ACE não produziu os dois planos.'}
+if ($Rows.Count -ne 1 -or @($Rows | Where-Object {-not $_.ChangeNeeded -or $_.Applied}).Count) {throw 'Prévia sem ACE não produziu o plano RDP-Tcp.'}
 # ACE de consulta já presente deve dispensar nova concessão (ramo InheritOnly).
 $script:Descriptor='O:SYG:SYD:(A;;0xf03bf;;;SY)(A;;0xf03bf;;;BA)(A;;CC;;;BU)'
 $Rows=@(& $Remote $Account $false)
-if ($Rows.Count -ne 2 -or @($Rows | Where-Object {$_.ChangeNeeded -or $_.Applied}).Count) {throw 'ACE existente não foi reconhecida.'}
+if ($Rows.Count -ne 1 -or @($Rows | Where-Object {$_.ChangeNeeded -or $_.Applied}).Count) {throw 'ACE existente não foi reconhecida.'}
 'WTS permission preview: OK (sem escrita)'
