@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.5"
+VERSION = "2.0.6"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -134,9 +134,59 @@ public static class MagbelWts {
             if type(row.get('id')) is not int or not 0<=row['id']<=2147483647 or row.get('state') not in ('active','disconnected','other') or not isinstance(account,str) or not 1<=len(account)<=256 or any(ord(c)<32 for c in account):raise ValueError('session')
             clean.append({k:row[k] for k in ('id','account','state')})
         if len({r['id'] for r in clean})!=len(clean):raise ValueError('duplicate_session')
+        names=consultar_nomes_sessoes(clean)
+        for row in clean:
+            name=names.get(row['account'].casefold())
+            if name:row['display_name']=name
         return {'ok':True,'source':'windows_wts_winrm','hostname':host,'checked_at':int(time.time()),'sessions':clean}
     except (OSError,ValueError,TypeError,AttributeError,subprocess.SubprocessError):
         return {'ok':False,'code':'windows_query_failed'}
+
+def consultar_nomes_sessoes(sessions):
+    """Enriquece somente contas WTS do domínio do agente; falha de AD não invalida WTS."""
+    accounts=list(dict.fromkeys(r['account'] for r in sessions if '\\' in r['account']))
+    if not accounts:return {}
+    encoded=base64.b64encode(json.dumps(accounts,ensure_ascii=False).encode('utf-8')).decode('ascii')
+    script=r'''
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+try {
+    $Accounts=@([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ACCOUNTS__')) | ConvertFrom-Json)
+    $Domain=Get-ADDomain -ErrorAction Stop
+    $Selected=@($Accounts | Where-Object {
+        $Parts=$_ -split '\\',2
+        $Parts.Count -eq 2 -and $Parts[0] -in @($Domain.NetBIOSName,$Domain.DNSRoot) -and $Parts[1]
+    })
+    if (-not $Selected.Count) {'[]';return}
+    function Escape-Ldap([string]$Value) {
+        $Value.Replace('\','\5c').Replace('*','\2a').Replace('(','\28').Replace(')','\29').Replace([string][char]0,'\00')
+    }
+    $Filters=@($Selected | ForEach-Object {'(sAMAccountName='+(Escape-Ldap (($_ -split '\\',2)[1]))+')'})
+    $Users=@(Get-ADUser -LDAPFilter ('(|'+($Filters -join '')+')') -SearchBase $Domain.DistinguishedName -Server $Domain.DNSRoot -Properties DisplayName -ResultSetSize 256 -ErrorAction Stop)
+    $Rows=@(foreach ($Account in $Selected) {
+        $Sam=($Account -split '\\',2)[1]
+        $Matches=@($Users | Where-Object {$_.SamAccountName -ieq $Sam})
+        if ($Matches.Count -eq 1 -and $Matches[0].DisplayName) {
+            [pscustomobject]@{account=$Account;display_name=[string]$Matches[0].DisplayName}
+        }
+    })
+    ConvertTo-Json -InputObject $Rows -Compress
+} catch {'[]'}
+'''.replace('__ACCOUNTS__',encoded)
+    try:
+        command=base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+        result=subprocess.run(['pwsh','-NoProfile','-NonInteractive','-EncodedCommand',command],capture_output=True,encoding='utf-8',errors='replace',timeout=15)
+        if result.returncode:return {}
+        rows=json.loads(result.stdout.lstrip('\ufeff').strip())
+        if not isinstance(rows,list) or len(rows)>128:return {}
+        allowed={a.casefold() for a in accounts};names={}
+        for row in rows:
+            if not isinstance(row,dict):continue
+            account=row.get('account');name=row.get('display_name')
+            if isinstance(account,str) and account.casefold() in allowed and isinstance(name,str) and name.strip() and len(name)<=256 and not any(ord(c)<32 or ord(c)==127 for c in name):
+                names[account.casefold()]=name.strip()
+        return names
+    except (OSError,ValueError,TypeError,subprocess.SubprocessError):return {}
 
 UPLOADS_DIR = os.path.join(BASE_DIR, "Uploads")
 

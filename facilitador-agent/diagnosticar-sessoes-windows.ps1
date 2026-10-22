@@ -10,7 +10,7 @@ if ((Get-AuthenticodeSignature -LiteralPath $PSCommandPath).Status -ne 'Valid') 
 $Text=[IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).ProviderPath).Replace("`r`n","`n").TrimEnd([char[]]"`r`n")+"`n"
 $Hasher=[Security.Cryptography.SHA256]::Create()
 try {$Hash=[BitConverter]::ToString($Hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))).Replace('-','').ToLowerInvariant()} finally {$Hasher.Dispose()}
-if ($Hash -ne '85242894a703ae6d7d57e521b91f4e9d237e51e00055fd918357ba9758a8c128') {throw 'Este diagnóstico requer o código 2.0.5 revisado.'}
+if ($Hash -notin @('85242894a703ae6d7d57e521b91f4e9d237e51e00055fd918357ba9758a8c128','bcde24d4c8f6a7413de8c062bd4140168954640bff8dfa62952cb77d6d9cb047')) {throw 'Este diagnóstico requer o código 2.0.5 ou 2.0.6 revisado.'}
 $Match=[regex]::Match($Text,"(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@")
 if (-not $Match.Success) {throw 'Wrapper WTS não encontrado.'}
 $Definition=$Match.Groups[1].Value.Replace('throw new InvalidOperationException("WtsQueryFailed")','{var e=new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());e.Data["SessionId"]=id;throw e;}').Replace('throw new InvalidOperationException("WtsEnumerateFailed")','throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error())').Replace('MagbelWts','MagbelDiagWts')
