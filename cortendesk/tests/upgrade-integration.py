@@ -53,7 +53,7 @@ def main():
         volumes=[{'type':'bind','source':str(root/'data'),'target':'/data'}]
         volumes += [{'type':'bind','source':str(path),'target':target,'read_only':True} for target,path in update.overlay(brand,ext,manifest).items()]
         config={'services':{'cortendesk':{'image':'ghcr.io/marcpope/cortendesk:1.14.0','container_name':name,'restart':'unless-stopped',
-            'environment':{'APP_NAME':'Magbel Remote CI','APP_URL':'https://support.example.test','APP_KEY':key,
+            'environment':{'APP_NAME':'Magbel Remote CI','APP_URL':'https://support.example.test',
                            'DB_CONNECTION':'sqlite','DB_DATABASE':'/data/test.sqlite','CACHE_STORE':'file','SESSION_DRIVER':'file',
                            'CORTENDESK_EMBEDDED_SERVER':'false','CORTENDESK_RDGEN_URL':'https://rdgen.example.test',
                            'MAGBEL_SESSION_TOKEN_GROUPS':'{"facilitador-tjpb-sessoes":"TJPB"}'},'volumes':volumes}},

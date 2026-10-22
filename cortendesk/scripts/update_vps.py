@@ -165,7 +165,10 @@ class Updater:
         if info['version']!=VERSION or info['php']<MIN_PHP: raise UpdateError('Versão da aplicação/PHP ainda não corrigida.')
         code='''$expected=json_decode(stream_get_contents(STDIN),true); foreach($expected as $path=>$hash){if(!is_file($path)||hash_file("sha256",$path)!==$hash){fwrite(STDERR,"Overlay divergente\\n");exit(1);}}'''
         self.docker('exec','-i','-u','www-data','-w','/app',self.container,'php','-r',code,input=json.dumps(expected).encode())
-        for command in [('optimize:clear',),('view:cache',)]:
+        # O entrypoint novo já regenera config/routes com APP_KEY lida de /data.
+        # Não apagar esse config cache via docker exec: a variável exportada
+        # pelo entrypoint não faz parte de Config.Env do contêiner.
+        for command in [('view:cache',)]:
             self.docker('exec','-u','www-data','-w','/app',self.container,'php','artisan',*command,'--no-ansi')
         routes=self.docker('exec','-u','www-data','-w','/app',self.container,'php','artisan','route:list','--path=facilitador','--except-vendor','--no-ansi')
         if b'api/v1/facilitador/capabilities' not in routes or b'/disconnect' not in routes: raise UpdateError('Rotas da ponte não estão disponíveis.')
