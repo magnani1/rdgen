@@ -111,3 +111,33 @@ class ConnectivityTests(unittest.TestCase):
         update.assert_not_called();controller.progress.assert_called_once()
         self.assertEqual(controller.progress.call_args.args[1],'failed')
         self.assertEqual(controller.diagnostics['app1.test'],report)
+
+class RuntimeInventoryTests(unittest.TestCase):
+    def sample(self):return {'python_version':'3.15.1','python_bits':64,'implementation':'CPython','packages':[{'name':'requests','version':'2.34.2'}]}
+
+    def test_runtime_probe_filters_fields_and_uses_only_managed_interpreter(self):
+        data={**self.sample(),'identity':'must-not-appear','PSComputerName':'fixture'}
+        with patch.object(p.subprocess,'run',return_value=Mock(returncode=0,stdout=json.dumps(data))) as run:
+            result=p.probe_runtime('app1.test')
+        self.assertEqual(result,self.sample())
+        script=base64.b64decode(run.call_args.args[0][-1]).decode('utf-16-le')
+        self.assertIn('AGENT_PYTHON',script);self.assertIn('ReparsePoint',script);self.assertIn('RuntimeOutsideRoot',script)
+        self.assertIn('& $Python -I -c $Query',script)
+        for command in ('pip install','Start-ScheduledTask','Stop-ScheduledTask','Set-ExecutionPolicy'):
+            self.assertNotIn(command,script)
+
+    def test_runtime_query_failure_or_duplicate_metadata_never_becomes_complete(self):
+        duplicate=self.sample();duplicate['packages']*=2
+        for output in ('null',json.dumps(duplicate),'invalid',json.dumps({**self.sample(),'python_bits':True})):
+            with patch.object(p.subprocess,'run',return_value=Mock(returncode=0,stdout=output)):
+                self.assertIsNone(p.probe_runtime('app1.test'))
+        with patch.object(p.subprocess,'run',side_effect=p.subprocess.TimeoutExpired('pwsh',40,stderr='private')):
+            self.assertIsNone(p.probe_runtime('app1.test'))
+
+    @unittest.skipUnless(os.name=='nt','Parser PowerShell nativo exige Windows nesta suíte')
+    def test_generated_inventory_script_parses_without_executing_remoting(self):
+        with patch.object(p.subprocess,'run',return_value=Mock(returncode=0,stdout='null')) as run:p.probe_runtime('app1.test')
+        encoded=run.call_args.args[0][-1]
+        parser="$Text=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('"+encoded+"'));$Tokens=$null;$Errors=$null;[Management.Automation.Language.Parser]::ParseInput($Text,[ref]$Tokens,[ref]$Errors)|Out-Null;if($Errors.Count){exit 1}"
+        result=p.subprocess.run(['pwsh','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(parser.encode('utf-16-le')).decode()],capture_output=True,timeout=30)
+        self.assertEqual(result.returncode,0)
