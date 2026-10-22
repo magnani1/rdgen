@@ -17,12 +17,14 @@ try {
     & $Helper -ComputerName $env:COMPUTERNAME -OperationId ('a'*32) -Action Apply -AgentSourcePath $Agent
     if ($Capture.Arguments.Count -ne 6) {throw 'UnexpectedTransport'}
     $Current=[Text.Encoding]::UTF8.GetString($Capture.Arguments[3])
-    $Old=$Current.Replace("import uuid`n",'').Replace('VERSION = "2.0.4"'+"`n"+'BOOT_ID = uuid.uuid4().hex','VERSION = "2.0.3"').Replace('"version": VERSION, "boot_id": BOOT_ID,','"version": VERSION,')
+    # Código sintético anterior para provar troca/rollback; o pin real é conferido separadamente.
+    $Old=$Current.Replace('VERSION = "2.0.5"','VERSION = "2.0.4"')
     $env:MAGBEL_MAINT_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Capture.Block.ToString()))
     $env:MAGBEL_MAINT_NEW=[Convert]::ToBase64String($Capture.Arguments[3])
     $env:MAGBEL_MAINT_OLD=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Old))
     $env:MAGBEL_MAINT_HASH=$Capture.Arguments[4]
-    $env:MAGBEL_MAINT_PREVIOUS=$Capture.Arguments[5]
+    $SyntheticHasher=[Security.Cryptography.SHA256]::Create()
+    try {$env:MAGBEL_MAINT_PREVIOUS=[BitConverter]::ToString($SyntheticHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($Old))).Replace('-','').ToLowerInvariant()} finally {$SyntheticHasher.Dispose()}
     $env:MAGBEL_MAINT_TEMP=$Temp
     $Fixture=@'
 $ErrorActionPreference='Stop'

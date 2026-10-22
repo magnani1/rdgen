@@ -60,7 +60,7 @@ $Python=Join-Path $Venv 'Scripts\python.exe'
 $Target=Join-Path $Root 'facilitador-agent.py'
 $Config=Join-Path $Root 'config.json'
 $Identity=Join-Path $Root 'identity.json'
-$Old='VERSION="2.0.2"'+"`r`n"
+$Old='VERSION="2.0.4"'+"`r`n"
 [IO.File]::WriteAllText($Target,$Old)
 @{AGENT_BASE_DIR=$Root;AGENT_PYTHON=$Python;UNCHANGED='fixture'} | ConvertTo-Json | Set-Content $Config -Encoding UTF8
 'identity-fixture-preserve' | Set-Content $Identity -Encoding UTF8
@@ -76,7 +76,7 @@ try {& $Block $env:COMPUTERNAME $Bytes $Hash} catch {
 $Bytes[0]=$Bytes[0] -bxor 1
 if (-not $Failed -or [IO.File]::ReadAllText($Target) -ne $Old) {throw 'CorruptTransportAccepted'}
 $Result=& $Block $env:COMPUTERNAME $Bytes $Hash
-if ($Result.AgentVersion -ne '2.0.4' -or $State.Starts -ne 1) {throw 'UpdateDidNotStartTask'}
+if ($Result.AgentVersion -ne '2.0.5' -or $State.Starts -ne 1) {throw 'UpdateDidNotStartTask'}
 if ((Get-FileHash $Target).Hash.ToLowerInvariant() -ne $Hash) {throw 'NewCodeMismatch'}
 if ([IO.File]::ReadAllText($Result.Backup) -ne $Old) {throw 'PreviousCodeNotPreserved'}
 if ((Get-FileHash $Config).Hash -ne $ConfigHash -or (Get-FileHash $Identity).Hash -ne $IdentityHash) {throw 'ConfigOrIdentityChanged'}

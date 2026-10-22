@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.4"
+VERSION = "2.0.5"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -62,6 +62,81 @@ def api(method, url, **kwargs):
     return response
 
 TIMEOUT_EXECUCAO = 600
+
+
+def consultar_sessoes_windows(host):
+    """Consulta WTS no destino por Kerberos; não conecta nem encerra sessões."""
+    host=str(host).lower()
+    if not re.fullmatch(r'[a-z][a-z0-9-]{0,62}(?:\.[a-z0-9][a-z0-9-]{0,62})*',host):
+        return {'ok':False,'code':'invalid_hostname'}
+    script=r'''
+$ErrorActionPreference='Stop'
+$HostName=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__HOST__'))
+try {
+    $Options=New-PSSessionOption -OpenTimeout 8000 -OperationTimeout 25000
+    $Data=Invoke-Command -ComputerName $HostName -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -SessionOption $Options -ArgumentList $HostName -ScriptBlock {
+        param($ExpectedHost)
+        $ErrorActionPreference='Stop'
+        if ($env:COMPUTERNAME -ine $ExpectedHost.Split('.')[0]) {throw 'ComputerMismatch'}
+        if (-not ('MagbelWts' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public class MagbelWtsRow { public int id; public string account; public string state; }
+public static class MagbelWts {
+ [StructLayout(LayoutKind.Sequential)] struct Session { public int id; public IntPtr name; public int state; }
+ [DllImport("wtsapi32.dll",EntryPoint="WTSEnumerateSessionsW",SetLastError=true)] static extern bool Enumerate(IntPtr server,int reserved,int version,out IntPtr buffer,out int count);
+ [DllImport("wtsapi32.dll",EntryPoint="WTSQuerySessionInformationW",SetLastError=true)] static extern bool Query(IntPtr server,int id,int kind,out IntPtr buffer,out int bytes);
+ [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr buffer);
+ static string Text(int id,int kind) {
+  IntPtr buffer=IntPtr.Zero; int bytes;
+  try { if(!Query(IntPtr.Zero,id,kind,out buffer,out bytes)) throw new InvalidOperationException("WtsQueryFailed");
+    return buffer==IntPtr.Zero ? "" : Marshal.PtrToStringUni(buffer); }
+  finally { if(buffer!=IntPtr.Zero) WTSFreeMemory(buffer); }
+ }
+ public static MagbelWtsRow[] Read() {
+  IntPtr buffer=IntPtr.Zero; int count;
+  var rows=new List<MagbelWtsRow>();
+  try {
+   if(!Enumerate(IntPtr.Zero,0,1,out buffer,out count)) throw new InvalidOperationException("WtsEnumerateFailed");
+   if(count<0 || count>128) throw new InvalidOperationException("WtsSessionLimit");
+   int size=Marshal.SizeOf(typeof(Session));
+   for(int i=0;i<count;i++) {
+    Session s=(Session)Marshal.PtrToStructure(IntPtr.Add(buffer,i*size),typeof(Session));
+    string user=Text(s.id,5); if(String.IsNullOrEmpty(user)) continue;
+    string domain=Text(s.id,7);
+    rows.Add(new MagbelWtsRow {id=s.id,account=String.IsNullOrEmpty(domain)?user:domain+"\\"+user,state=s.state==0?"active":s.state==4?"disconnected":"other"});
+   }
+   return rows.ToArray();
+  } finally { if(buffer!=IntPtr.Zero) WTSFreeMemory(buffer); }
+ }
+}
+'@
+        }
+        $Rows=@([MagbelWts]::Read())
+        [pscustomobject]@{computer=$env:COMPUTERNAME;sessions=$Rows}
+    }
+    $Data | ConvertTo-Json -Depth 5 -Compress
+} catch { 'null' }
+'''.replace('__HOST__',base64.b64encode(host.encode('utf-8')).decode('ascii'))
+    try:
+        command=base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+        result=subprocess.run(['pwsh','-NoProfile','-NonInteractive','-EncodedCommand',command],capture_output=True,encoding='utf-8',errors='replace',timeout=40)
+        if result.returncode:return {'ok':False,'code':'windows_query_failed'}
+        data=json.loads(result.stdout.lstrip('\ufeff').strip())
+        if not isinstance(data,dict) or str(data.get('computer','')).lower()!=host.split('.')[0]:raise ValueError('identity')
+        rows=data.get('sessions')
+        if not isinstance(rows,list) or len(rows)>128:raise ValueError('sessions')
+        clean=[]
+        for row in rows:
+            account=row.get('account')
+            if type(row.get('id')) is not int or not 0<=row['id']<=2147483647 or row.get('state') not in ('active','disconnected','other') or not isinstance(account,str) or not 1<=len(account)<=256 or any(ord(c)<32 for c in account):raise ValueError('session')
+            clean.append({k:row[k] for k in ('id','account','state')})
+        if len({r['id'] for r in clean})!=len(clean):raise ValueError('duplicate_session')
+        return {'ok':True,'source':'windows_wts_winrm','hostname':host,'checked_at':int(time.time()),'sessions':clean}
+    except (OSError,ValueError,TypeError,AttributeError,subprocess.SubprocessError):
+        return {'ok':False,'code':'windows_query_failed'}
 
 UPLOADS_DIR = os.path.join(BASE_DIR, "Uploads")
 
@@ -550,6 +625,9 @@ def processar_job(job):
         elif tipo == "ad_buscar":
             resultado = buscar_ad(payload.get("termo", ""), payload.get("tipo", "usuario"))
             status = "concluido"
+        elif tipo == "windows_sessions":
+            resultado = consultar_sessoes_windows(payload.get('hostname',''))
+            status = "concluido" if resultado.get('ok') else "erro"
         else:
             resultado = {"erro": f"Tipo desconhecido: {tipo}"}
             status = "erro"
