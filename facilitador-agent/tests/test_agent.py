@@ -7,6 +7,17 @@ os.environ['HOME_URL']='https://test.invalid'
 spec=importlib.util.spec_from_file_location('managed_agent',ROOT/'facilitador-agent.py');agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
 
 class AgentTests(unittest.TestCase):
+    def test_heartbeat_reports_actual_runtime_without_paths_or_secrets(self):
+        response=Mock();response.json.return_value={'desired':'drain','slots':2,'capabilities':['winrm'],'inventory_writer':False,'renewed':[]}
+        with patch.object(agent,'api',return_value=response) as request,patch.object(agent.time,'sleep',side_effect=InterruptedError),patch.object(agent,'RUNNING',{}):
+            with self.assertRaises(InterruptedError):agent.heartbeat_loop()
+        payload=request.call_args.kwargs['json']
+        self.assertEqual(payload['python_version'],agent.platform.python_version())
+        self.assertEqual(payload['python_bits'],agent.sys.maxsize.bit_length()+1)
+        self.assertEqual(payload['requests_version'],agent.requests.__version__)
+        self.assertEqual(payload['version'],'2.0.3')
+        self.assertEqual(set(agent.runtime_versions()),{'python_version','python_bits','requests_version'})
+
     def test_callback_uses_attempt_token(self):
         agent.AGENT_TOKEN='identity-secret';agent.RUNNING['job']='attempt-secret';context=agent.CURRENT_JOB.set('job')
         try:
@@ -62,3 +73,4 @@ class AgentTests(unittest.TestCase):
             inventory.assert_not_called();api.assert_not_called()
 
 if __name__=='__main__':unittest.main()
+
