@@ -25,11 +25,11 @@ if (-not $Function) { throw 'Template do launcher não encontrado.' }
 . ([scriptblock]::Create($Function.Extent.Text))
 New-Item -ItemType Directory -Path $Destination | Out-Null
 # Lista explícita: não copia identidade, configuração, venv ou segredos.
-foreach ($File in @('instalar-agente.ps1','facilitador-agent.py','requirements.txt','README.md','INSTALACAO-DO-ZERO.md','ASSISTENTE-EXE.md','fleet_manager.py','setup_assistant.py','GERENCIAMENTO-FROTA.md')) {
+foreach ($File in @('instalar-agente.ps1','facilitador-agent.py','requirements.txt','README.md','INSTALACAO-DO-ZERO.md','ASSISTENTE-EXE.md','fleet_manager.py','setup_assistant.py','GERENCIAMENTO-FROTA.md','manutencao-agente.ps1','maintenance_controller.py','ATUALIZACAO-PELO-PAINEL.md')) {
     Copy-Item -LiteralPath (Join-Path $PackageSource $File) -Destination $Destination
 }
 Get-AgentLauncher | Set-Content (Join-Path $Destination 'run-agent.ps1') -Encoding utf8BOM
-foreach ($File in @('instalar-agente.ps1','run-agent.ps1')) {
+foreach ($File in @('instalar-agente.ps1','run-agent.ps1','manutencao-agente.ps1')) {
     $Signature=Set-AuthenticodeSignature -FilePath (Join-Path $Destination $File) -Certificate $Certificate -HashAlgorithm SHA256
     if ($Signature.Status -ne 'Valid') { throw "Assinatura inválida de ${File}: $($Signature.Status). Não distribuir este pacote." }
 }
@@ -59,3 +59,4 @@ $Manifest | ConvertTo-Json | Set-Content (Join-Path $Destination 'SHA256.json') 
 Write-Host "Pacote preparado: $Destination"
 Write-Host 'Distribua a pasta inteira pelo canal institucional. A chave privada permaneceu na estação de assinatura.'
 Write-Host 'SHA256.json detecta alterações de transporte; não substitui a assinatura nem a confiança no canal de distribuição.'
+
