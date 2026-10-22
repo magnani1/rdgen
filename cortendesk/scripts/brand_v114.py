@@ -34,10 +34,10 @@ def brand(text, path):
         text = text.replace('Keyed on the release version rather than filemtime:', 'Keyed on the release version and the mounted asset filemtime:')
     return text
 
-def prepare(source, destination, assets=None):
+def prepare(source, destination, assets=None, manifest_path=None):
     source, destination = Path(source), Path(destination)
     assets = Path(assets or PACKAGE/'assets')
-    manifest = json.loads((PACKAGE/'manifest.json').read_text())
+    manifest = json.loads(Path(manifest_path or PACKAGE/'manifest.json').read_text())
     if destination.exists():
         raise ValueError('Destino já existe; use um diretório novo para preservar rollback')
     outputs = {}
@@ -45,7 +45,7 @@ def prepare(source, destination, assets=None):
         src = source/item['upstream']
         raw = src.read_bytes()
         if hashlib.sha256(canonical(raw)).hexdigest() != item['source_sha256']:
-            raise ValueError('Base diverge de 1.14.0: '+item['upstream'])
+            raise ValueError('Base diverge de '+manifest['version']+': '+item['upstream'])
         outputs[item['local']] = brand(raw.decode('utf-8'), item['local']).encode('utf-8')
     for name, checksum in manifest['assets'].items():
         raw = (assets/name).read_bytes()
@@ -58,13 +58,15 @@ def prepare(source, destination, assets=None):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(raw)
     checksums = {name:hashlib.sha256(raw).hexdigest() for name,raw in outputs.items()}
-    (destination/'MAGBEL-MANIFEST.json').write_text(json.dumps({'upstream':'1.14.0','sha256':checksums},indent=2)+'\n')
+    (destination/'MAGBEL-MANIFEST.json').write_text(json.dumps({'upstream':manifest['version'],'sha256':checksums},indent=2)+'\n')
     return checksums
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--source',required=True,help='Diretório /app extraído da imagem nova sem inicializá-la')
     parser.add_argument('--destination',required=True)
+    parser.add_argument('--manifest',default=str(PACKAGE/'manifest.json'))
     args=parser.parse_args()
-    result=prepare(args.source,args.destination)
-    print(f'Preparados {len(result)} arquivos de marca para CortenDesk 1.14.0.')
+    result=prepare(args.source,args.destination,manifest_path=args.manifest)
+    print(f'Preparados {len(result)} arquivos de marca conferidos pelo manifesto.')
+
