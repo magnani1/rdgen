@@ -124,3 +124,18 @@ Backup: `C:\ProgramData\Magbel\Maintenance\manutencao-tjpb-app4\backups\<carimbo
 O pacote do conector passa a acrescentar `runtime` nas sondas de destinos administrativamente acessíveis. Consulta somente nome/versão das distribuições instaladas, Python, arquitetura e implementação no AGENT_PYTHON configurado do runtime protegido, recusando executável fora dele e links/junctions. Usa WinRM padrão/Kerberos e Python existente com -I. Não lê/exporta ambiente, credencial ou conteúdo de scripts. É inventário do ambiente configurado; não atestação de integridade do PID. A versão do executor permanece 2.0.4 e seu código não é trocado nesta etapa.
 
 As consultas públicas OSV/PyPI/Python.org são feitas por uma rotina separada e habilitada explicitamente no DietPi, não pela conta Windows. Conector antigo continua compatível, mas não informa o inventário completo. Atualizar primeiro o backend 20261022f, então preparar pacote novo assinado e atualizar somente a tarefa de manutenção já inscrita, preservando DPAPI/venv/tarefa e backup conforme procedimento anterior. Guia completo, bloco autocontido de atualização e limites de cobertura: [OPERACAO-SEGURANCA-RUNTIMES.md](https://github.com/magnani1/facilitador-core/blob/main/OPERACAO-SEGURANCA-RUNTIMES.md).
+
+## Entrega 2.0.5 — sessões Windows no suporte
+
+Novo executor inclui consulta WTS somente leitura por WinRM/Kerberos, com destino
+DNS explícito, conferência do nome Windows, múltiplas sessões e resultado limitado.
+Backend agenda a consulta original-admin para dispositivo ativo do grupo do cliente;
+conector permanente permanece restrito à atualização dos APPs. Não recebe permissão
+nova para executar scripts nos computadores dos usuários: essa consulta usa os
+executores e a conta da tarefa já autorizada. Não altera ACL, Python ou inscrição.
+
+Preparar e assinar pacote novo; atualizar o conector pelo updater existente antes
+de agendar 2.0.4 → 2.0.5 pelo painel. Esperar ausência de manutenção aberta. Helper
+fixa hashes de origem/destino; rollback mantém 2.0.4. Backend aceita anúncio antigo
+2.0.4 para conservar sondas, mas não lhe entrega operação 2.0.5. Manual completo:
+[OPERACAO-SESSOES-WINDOWS.md](https://github.com/magnani1/facilitador-core/blob/main/OPERACAO-SESSOES-WINDOWS.md).
