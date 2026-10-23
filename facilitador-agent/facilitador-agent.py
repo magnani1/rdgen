@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.6"
+VERSION = "2.0.7"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -562,8 +562,168 @@ def registrar_display_name(job_id, usuario):
     except Exception as e:
         print(f"[agent] falha meta {job_id}: {e}")    
 
+def executar_winget(job_id, payload):
+    """Executa somente o snapshot aprovado, no cliente Windows e na identidade WinRM."""
+    plan = payload.get('winget') or {}
+    host = (payload.get('alvos') or [''])[0]
+    source = plan.get('source') or {}
+    package = plan.get('package') or {}
+    if (not re.fullmatch(r'[a-f0-9-]{36}', str(job_id)) or payload.get('client_id') != CLIENT_ID
+            or payload.get('engine') != 'winget.v1' or len(payload.get('alvos', [])) != 1
+            or not re.fullmatch(r'[a-z][a-z0-9-]{0,62}(?:\.[a-z0-9][a-z0-9-]{0,62})*', str(host))
+            or plan.get('action') not in ('check', 'install') or package.get('scope') != 'machine'
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{2,149}', str(package.get('package_id', '')))
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,59}', str(package.get('version', '')))
+            or package.get('architecture') not in ('x64', 'x86', 'arm64')
+            or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{1,39}', str(source.get('name', '')))
+            or source.get('type') not in ('Microsoft.Rest', 'Microsoft.PreIndexed.Package')
+            or not str(source.get('url', '')).startswith('https://')
+            or (plan['action'] == 'install' and (plan.get('agreements') is not True
+                or not package.get('detection_name') or not package.get('detection_version')))):
+        return {'ok': False, 'code': 'invalid_winget_plan', 'erro': 'Plano WinGet inválido; nada executado'}
+    data = {'job_id': job_id, 'client_id': CLIENT_ID, 'hostname': host,
+            'action': plan['action'], 'agreements': plan.get('agreements', False), 'revision': plan.get('revision', ''),
+            'source': {k: source[k] for k in ('name', 'type', 'url')},
+            'package': {k: package.get(k, '') for k in ('package_id', 'version', 'architecture', 'scope',
+                        'detection_name', 'detection_version', 'detection_product_code')}}
+    script = r'''
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+[Console]::InputEncoding=[Text.Encoding]::UTF8
+$Plan=[Console]::In.ReadToEnd() | ConvertFrom-Json
+$Options=New-PSSessionOption -OpenTimeout 10000 -OperationTimeout 30000
+try {
+ Invoke-Command -ComputerName $Plan.hostname -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -SessionOption $Options -ArgumentList $Plan -ScriptBlock {
+  param($Plan)
+  $ErrorActionPreference='Stop'
+  $Stage='preflight';$Attempted=$false;$Root=$null
+  $Result=@{ok=$false;job_id=$Plan.job_id;client_id=$Plan.client_id;hostname=$Plan.hostname;code='preflight_failed';stage=$Stage;uncertain=$false}
+  function Event([string]$Phase) {'MAGBEL_WINGET_EVENT:'+(@{stage=$Phase} | ConvertTo-Json -Compress)}
+  try {
+   Event 'preflight'
+   if ($env:COMPUTERNAME -ine $Plan.hostname.Split('.')[0]) {throw 'hostname_mismatch'}
+   $Identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+   $Result.identity=$Identity.Name
+   if ($Identity.User.Value -eq 'S-1-5-18') {throw 'system_cli_unsupported'}
+   if (-not ([Security.Principal.WindowsPrincipal]::new($Identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {throw 'admin_required'}
+   $OS=Get-CimInstance Win32_OperatingSystem
+   if (-not (([int]$OS.ProductType -eq 1 -and [int]$OS.BuildNumber -ge 17763) -or [int]$OS.BuildNumber -ge 26100)) {throw 'os_unsupported'}
+   $Winget=$null
+   $App=Get-AppxPackage -Name Microsoft.DesktopAppInstaller -ErrorAction SilentlyContinue | Select-Object -First 1
+   if ($App -and $App.InstallLocation) {$Winget=Join-Path $App.InstallLocation 'winget.exe'}
+   if (-not $Winget -or -not (Test-Path -LiteralPath $Winget -PathType Leaf)) {throw 'winget_not_registered'}
+   $Signature=Get-AuthenticodeSignature -LiteralPath $Winget
+   if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation(?:,|$)') {throw 'winget_signature_invalid'}
+   $Root=Join-Path $env:ProgramData ('Magbel\WingetJobs\'+$Plan.job_id)
+   if (Test-Path -LiteralPath $Root) {throw 'operation_already_seen'}
+   New-Item -Path $Root -ItemType Directory -ErrorAction Stop | Out-Null
+   $null=& icacls.exe $Root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
+   if ($LASTEXITCODE -ne 0) {throw 'log_acl_failed'}
+   function Native([string[]]$Arguments,[string]$Name,[int]$Seconds=30) {
+    $Out=Join-Path $Root ($Name+'.out.txt');$Err=Join-Path $Root ($Name+'.err.txt')
+    $Process=Start-Process -FilePath $Winget -ArgumentList $Arguments -NoNewWindow -PassThru -RedirectStandardOutput $Out -RedirectStandardError $Err
+    try {
+     if (-not $Process.WaitForExit($Seconds*1000)) {Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue;throw 'native_timeout'}
+     $Process.WaitForExit();$Process.Refresh()
+     [pscustomobject]@{exit_code=$Process.ExitCode;output=$Out}
+    } finally {$Process.Dispose()}
+   }
+   $Version=Native @('--version') 'version'
+   if ($Version.exit_code -ne 0) {throw 'winget_unavailable'}
+   $Export=Native @('source','export','--name',$Plan.source.name) 'source'
+   if ($Export.exit_code -ne 0 -or (Get-Item $Export.output).Length -gt 65536) {throw 'source_unavailable'}
+   $Sources=@(Get-Content -LiteralPath $Export.output -Raw -Encoding UTF8 | ConvertFrom-Json)
+   $Found=@($Sources | Where-Object {$_.Name -ceq $Plan.source.name})
+   if ($Found.Count -ne 1 -or $Found[0].Type -ine $Plan.source.type -or ([string]$Found[0].Arg).TrimEnd('/') -cne ([string]$Plan.source.url).TrimEnd('/')) {throw 'source_mismatch'}
+   $Stage='source_checked';Event $Stage
+   function Detect {
+    if (-not $Plan.package.detection_name -or -not $Plan.package.detection_version) {return $false}
+    $Rows=@(foreach ($Base in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
+     if (Test-Path $Base) {Get-ChildItem -LiteralPath $Base -ErrorAction Stop | ForEach-Object {Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction Stop}}
+    })
+    $Matches=@($Rows | Where-Object {[string]$_.DisplayName -ceq $Plan.package.detection_name -and [string]$_.DisplayVersion -ceq $Plan.package.detection_version -and (-not $Plan.package.detection_product_code -or $_.PSChildName -ieq $Plan.package.detection_product_code)})
+    return ($Matches.Count -eq 1)
+   }
+   if (Detect) {$Result.ok=$true;$Result.code='already_installed';$Result.detected=$true}
+   else {
+    $ShowArguments=@('show','--id',$Plan.package.package_id,'--exact','--version',$Plan.package.version,'--source',$Plan.source.name,'--disable-interactivity')
+    if ($Plan.agreements) {$ShowArguments+='--accept-source-agreements'}
+    $Show=Native $ShowArguments 'show' 40
+    if ($Show.exit_code -ne 0) {$Result.exit_code=$Show.exit_code;throw 'package_check_failed'}
+    $Stage='package_checked';Event $Stage
+    if ($Plan.action -eq 'check') {$Result.ok=$true;$Result.code='preflight_ready';$Result.detected=$false}
+    else {
+     $Stage='installing';Event $Stage
+     # Marcador privado antes de iniciar; esta operação nunca é repetida automaticamente.
+     @{job_id=$Plan.job_id;revision=$Plan.revision;stage='installing'} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Root 'operation.json') -Encoding UTF8
+     $Attempted=$true
+     $Install=Native @('install','--id',$Plan.package.package_id,'--exact','--version',$Plan.package.version,'--source',$Plan.source.name,'--architecture',$Plan.package.architecture,'--scope','machine','--silent','--disable-interactivity','--accept-source-agreements','--accept-package-agreements') 'install' 420
+     $Result.exit_code=$Install.exit_code
+     $Stage='verifying';Event $Stage
+     $Result.detected=Detect
+     if ($Install.exit_code -eq 0 -and $Result.detected) {$Result.ok=$true;$Result.code='installed_verified'}
+     else {throw 'installation_not_confirmed'}
+    }
+   }
+  } catch {
+   $Known=@('hostname_mismatch','system_cli_unsupported','admin_required','os_unsupported','winget_not_registered','winget_signature_invalid','operation_already_seen','log_acl_failed','native_timeout','winget_unavailable','source_unavailable','source_mismatch','package_check_failed','installation_not_confirmed')
+   $Code=$_.Exception.Message
+   $Result.code=if ($Code -in $Known) {$Code} else {'windows_operation_failed'}
+   $Result.uncertain=$Attempted -or $Code -eq 'operation_already_seen'
+  }
+  $Result.stage=$Stage
+  if ($Root) {$Result.log_path=$Root}
+  'MAGBEL_WINGET_RESULT:'+($Result | ConvertTo-Json -Depth 5 -Compress)
+ } | ForEach-Object {[Console]::WriteLine($_)}
+} catch { [Console]::WriteLine('MAGBEL_WINGET_TRANSPORT_FAILED') }
+'''
+    command = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+    events = {'preflight', 'source_checked', 'package_checked', 'installing', 'verifying'}
+    process = None
+    try:
+        process = subprocess.Popen(['pwsh', '-NoProfile', '-NonInteractive', '-EncodedCommand', command],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8', errors='replace')
+        output = queue.Queue()
+        def read():
+            try:
+                for line in process.stdout:
+                    line = line.lstrip('\ufeff')
+                    if line.startswith('MAGBEL_WINGET_'):
+                        output.put(line[:16000])
+            finally: output.put(None)
+        threading.Thread(target=read, daemon=True).start()
+        process.stdin.write(json.dumps(data, ensure_ascii=False))
+        process.stdin.close()
+        start = time.monotonic(); result = None
+        while time.monotonic() - start < 540:
+            try: line = output.get(timeout=0.5)
+            except queue.Empty: continue
+            if line is None: break
+            if line.startswith('MAGBEL_WINGET_EVENT:'):
+                event = json.loads(line.split(':', 1)[1])
+                if event.get('stage') in events: enviar_log(job_id, '[WinGet] ' + event['stage'])
+            elif line.startswith('MAGBEL_WINGET_RESULT:'):
+                result = json.loads(line.split(':', 1)[1])
+        if not isinstance(result, dict) or result.get('job_id') != job_id or result.get('hostname') != host or result.get('client_id') != CLIENT_ID:
+            raise ValueError('unconfirmed_transport')
+        if type(result.get('ok')) is not bool or type(result.get('uncertain')) is not bool:
+            raise ValueError('invalid_result')
+        enviar_log(job_id, '[WinGet] ' + str(result.get('code', 'unconfirmed')))
+        if not result['ok']: result['erro'] = 'WinGet: ' + str(result.get('code', 'unconfirmed'))
+        return result
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return {'ok': False, 'uncertain': True, 'code': 'transport_unconfirmed', 'erro': 'WinGet sem resultado confirmado; conferir cliente antes de repetir'}
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            try: process.wait(timeout=5)
+            except subprocess.SubprocessError: pass
+
+
 # ================= DISPATCHER =================
 def executar(job_id, payload):
+    if payload.get('engine') == 'winget.v1':
+        return executar_winget(job_id, payload)
     script_name = payload.get("script", payload["programa"]).upper()
     script_path = resolver_script(script_name)
     if not script_path:

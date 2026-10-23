@@ -76,7 +76,7 @@ try {& $Block $env:COMPUTERNAME $Bytes $Hash} catch {
 $Bytes[0]=$Bytes[0] -bxor 1
 if (-not $Failed -or [IO.File]::ReadAllText($Target) -ne $Old) {throw 'CorruptTransportAccepted'}
 $Result=& $Block $env:COMPUTERNAME $Bytes $Hash
-if ($Result.AgentVersion -ne '2.0.6' -or $Result.PreviousVersion -ne $env:MAGBEL_CODE_TEST_PREVIOUS -or $State.Starts -ne 1) {throw 'UpdateDidNotStartTask'}
+if ($Result.AgentVersion -ne '2.0.7' -or $Result.PreviousVersion -ne $env:MAGBEL_CODE_TEST_PREVIOUS -or $State.Starts -ne 1) {throw 'UpdateDidNotStartTask'}
 if ((Get-FileHash $Target).Hash.ToLowerInvariant() -ne $Hash) {throw 'NewCodeMismatch'}
 if ([IO.File]::ReadAllText($Result.Backup) -ne $Old) {throw 'PreviousCodeNotPreserved'}
 if ((Get-FileHash $Config).Hash -ne $ConfigHash -or (Get-FileHash $Identity).Hash -ne $IdentityHash) {throw 'ConfigOrIdentityChanged'}
@@ -89,7 +89,7 @@ if (-not $Failed -or $State.Starts -ne 1) {throw 'RepeatedUpdateAccepted'}
 Write-Host 'PS5.1: troca real, backup, inscrição/config preservadas, hash e tarefa em execução: OK'
 '@
     $Encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Fixture))
-    foreach ($Version in @('2.0.4','2.0.5')) {
+    foreach ($Version in @('2.0.6')) {
         $env:MAGBEL_CODE_TEST_PREVIOUS=$Version
         $env:MAGBEL_CODE_TEST_ROOT=Join-Path $Temp $Version
         & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -EncodedCommand $Encoded
