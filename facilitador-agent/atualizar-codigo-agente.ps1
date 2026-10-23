@@ -46,7 +46,8 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
     if ($Hash -ne $ExpectedHash) { throw 'Hash divergente no destino.' }
     $Current = [IO.File]::ReadAllText($Target).Replace("`r`n","`n").TrimEnd([char[]]"`r`n") + "`n"
     if ($Current -eq [Text.Encoding]::UTF8.GetString($Bytes)) { throw 'Agente 2.0.6 já instalado. Confira o painel; não repita a atualização.' }
-    if ($Current -notmatch '(?m)^VERSION\s*=\s*["'']2\.0\.5["'']\s*$') { throw 'Esta entrega atualiza apenas o agente 2.0.5 para 2.0.6.' }
+    if ($Current -notmatch '(?m)^VERSION\s*=\s*["''](2\.0\.[45])["'']\s*$') { throw 'Esta entrega atualiza apenas o agente 2.0.4 ou 2.0.5 para 2.0.6.' }
+    $PreviousVersion = $Matches[1]
     $Config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($Config.AGENT_BASE_DIR -ine $Root -or -not $Config.AGENT_PYTHON) { throw 'Configuração não corresponde ao runtime.' }
     $Python = [IO.Path]::GetFullPath([string]$Config.AGENT_PYTHON)
@@ -73,7 +74,7 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
         $Replaced = $true
         if ((Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedHash) { throw 'Conferência do código instalado falhou.' }
         Start-ScheduledTask -TaskName $TaskName
-        [pscustomobject]@{Computer=$env:COMPUTERNAME;AgentVersion='2.0.6';Python=$Python;IdentityPreserved=$true;ConfigPreserved=$true;Backup=$Previous;Activation='Aguardar heartbeat 2.0.6, conferir Python e prontidão; testar antes de ativar.'}
+        [pscustomobject]@{Computer=$env:COMPUTERNAME;AgentVersion='2.0.6';PreviousVersion=$PreviousVersion;Python=$Python;IdentityPreserved=$true;ConfigPreserved=$true;Backup=$Previous;Activation='Aguardar heartbeat 2.0.6, conferir Python e prontidão; testar antes de ativar.'}
     } catch {
         if ($Replaced) { Write-Warning "Código trocado; confira tarefa/painel antes de repetir. Backup anterior: $Previous" }
         throw
