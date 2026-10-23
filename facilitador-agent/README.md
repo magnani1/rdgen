@@ -139,3 +139,11 @@ Procedimento: https://github.com/magnani1/facilitador-core/blob/main/OPERACAO-EN
 ## Instalação central de novos APPs
 
 Use o [gerenciador Python de frota](GERENCIAMENTO-FROTA.md) para conferir destinos e instalar pacote institucional assinado via WinRM. Comece pelo APP3; sem `--apply` a consulta não altera máquinas. A primeira versão preserva instalações existentes e não substitui atualização com drenagem.
+
+
+## WinGet no cliente — agente 2.0.7
+
+Execução em fila de pacote de máquina aprovado, fonte exata, detecção HKLM e
+resultado desconhecido sem repetição. Conferência/instalação pelo painel; APP
+Server 2022 continua coordenador. Preparação assinada e piloto:
+[WINGET-207.md](WINGET-207.md). Não muda Python, conta ou inscrição.

@@ -8,13 +8,13 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ((Get-AuthenticodeSignature -LiteralPath $PSCommandPath).Status -ne 'Valid') { throw 'Assine esta cópia do helper na estação administrativa.' }
-$Expected = 'bcde24d4c8f6a7413de8c062bd4140168954640bff8dfa62952cb77d6d9cb047'
-$PreviousHash = '85242894a703ae6d7d57e521b91f4e9d237e51e00055fd918357ba9758a8c128'
+$Expected = '0ed87034b19c0a525915dd0baf08b709acdefeefc624e8902a0be8503b9ee22c'
+$PreviousHash = 'bcde24d4c8f6a7413de8c062bd4140168954640bff8dfa62952cb77d6d9cb047'
 $Text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).ProviderPath).Replace("`r`n","`n").TrimEnd([char[]]"`r`n")+"`n"
 $Bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
 $Hasher = [Security.Cryptography.SHA256]::Create()
 try { $Hash = [BitConverter]::ToString($Hasher.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant() } finally { $Hasher.Dispose() }
-if ($Hash -ne $Expected) { throw 'Código fora da referência homologada 2.0.6.' }
+if ($Hash -ne $Expected) { throw 'Código fora da referência homologada 2.0.7.' }
 $HostId = $ComputerName.Split('.')[0].ToLowerInvariant()
 Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -ArgumentList $HostId,$OperationId,$Action,$Bytes,$Expected,$PreviousHash -ScriptBlock {
     param($Id,$OperationId,$Action,[byte[]]$Bytes,$Expected,$PreviousHash)
@@ -49,7 +49,7 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
     if ($Task.Principal.LogonType -ne 'Password') { throw 'Esta entrega preserva tarefas existentes com LogonType Password.' }
     if ($Action -eq 'Apply') {
         if (Test-Path -LiteralPath $Backup) { throw 'Operação já iniciada; não repetir a instalação.' }
-        if ((Canonical-Hash $Target) -ne $PreviousHash) { throw 'Esta entrega atualiza somente o código 2.0.5 homologado.' }
+        if ((Canonical-Hash $Target) -ne $PreviousHash) { throw 'Esta entrega atualiza somente o código 2.0.6 homologado.' }
         New-Item -ItemType Directory -Path $Backup | Out-Null
         $null = & icacls.exe $Backup /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
         if ($LASTEXITCODE -ne 0) { throw 'Não foi possível proteger o backup.' }
