@@ -60,7 +60,7 @@ $Python=Join-Path $Venv 'Scripts\python.exe'
 $Target=Join-Path $Root 'facilitador-agent.py'
 $Config=Join-Path $Root 'config.json'
 $Identity=Join-Path $Root 'identity.json'
-$Old='VERSION="2.0.5"'+"`r`n"
+$Old='VERSION="'+$env:MAGBEL_CODE_TEST_PREVIOUS+'"'+"`r`n"
 [IO.File]::WriteAllText($Target,$Old)
 @{AGENT_BASE_DIR=$Root;AGENT_PYTHON=$Python;UNCHANGED='fixture'} | ConvertTo-Json | Set-Content $Config -Encoding UTF8
 'identity-fixture-preserve' | Set-Content $Identity -Encoding UTF8
@@ -76,7 +76,7 @@ try {& $Block $env:COMPUTERNAME $Bytes $Hash} catch {
 $Bytes[0]=$Bytes[0] -bxor 1
 if (-not $Failed -or [IO.File]::ReadAllText($Target) -ne $Old) {throw 'CorruptTransportAccepted'}
 $Result=& $Block $env:COMPUTERNAME $Bytes $Hash
-if ($Result.AgentVersion -ne '2.0.6' -or $State.Starts -ne 1) {throw 'UpdateDidNotStartTask'}
+if ($Result.AgentVersion -ne '2.0.6' -or $Result.PreviousVersion -ne $env:MAGBEL_CODE_TEST_PREVIOUS -or $State.Starts -ne 1) {throw 'UpdateDidNotStartTask'}
 if ((Get-FileHash $Target).Hash.ToLowerInvariant() -ne $Hash) {throw 'NewCodeMismatch'}
 if ([IO.File]::ReadAllText($Result.Backup) -ne $Old) {throw 'PreviousCodeNotPreserved'}
 if ((Get-FileHash $Config).Hash -ne $ConfigHash -or (Get-FileHash $Identity).Hash -ne $IdentityHash) {throw 'ConfigOrIdentityChanged'}
@@ -89,9 +89,13 @@ if (-not $Failed -or $State.Starts -ne 1) {throw 'RepeatedUpdateAccepted'}
 Write-Host 'PS5.1: troca real, backup, inscrição/config preservadas, hash e tarefa em execução: OK'
 '@
     $Encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Fixture))
-    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -EncodedCommand $Encoded
-    if ($LASTEXITCODE -ne 0) {throw 'NativeCodeUpdateTestFailed'}
+    foreach ($Version in @('2.0.4','2.0.5')) {
+        $env:MAGBEL_CODE_TEST_PREVIOUS=$Version
+        $env:MAGBEL_CODE_TEST_ROOT=Join-Path $Temp $Version
+        & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -EncodedCommand $Encoded
+        if ($LASTEXITCODE -ne 0) {throw "NativeCodeUpdateTestFailed: $Version"}
+    }
 } finally {
-    foreach ($Name in @('MAGBEL_CODE_TEST_BLOCK','MAGBEL_CODE_TEST_BYTES','MAGBEL_CODE_TEST_HASH','MAGBEL_CODE_TEST_ROOT')) {Remove-Item "Env:\$Name" -ErrorAction SilentlyContinue}
+    foreach ($Name in @('MAGBEL_CODE_TEST_BLOCK','MAGBEL_CODE_TEST_BYTES','MAGBEL_CODE_TEST_HASH','MAGBEL_CODE_TEST_ROOT','MAGBEL_CODE_TEST_PREVIOUS')) {Remove-Item "Env:\$Name" -ErrorAction SilentlyContinue}
     Remove-Item $Temp -Recurse -Force
 }
