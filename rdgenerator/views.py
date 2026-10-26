@@ -281,7 +281,7 @@ def generate_custom_client(params, full_url):
         url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-windows.yml/dispatches'
         if selfhosted:
             url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/sh-generator-windows.yml/dispatches'
-    if platform == 'windows-x86':
+    elif platform == 'windows-x86':
         url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-windows-x86.yml/dispatches'
     elif platform == 'linux':
         url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-linux.yml/dispatches'
@@ -363,14 +363,16 @@ def generate_custom_client(params, full_url):
         status="Starting generator...please wait"
     )
     try:
-        response = requests.post(url, json=data, headers=headers)
-        if response.status_code == 204 or response.status_code == 200:
-            github_data = response.json()
-            print(github_data)
-            new_github_run.github_run_id = github_data.get('workflow_run_id')
-            new_github_run.status = "in_progress"
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        if response.status_code in (200, 204):
+            # GitHub can return 204 No Content; never decode it as JSON.
+            github_data = response.json() if response.content else {}
+            run_id = github_data.get('workflow_run_id')
+            new_github_run.github_run_id = run_id
+            new_github_run.status = "in_progress" if run_id else "queued"
             new_github_run.save()
-
+            print(f"GitHub dispatch accepted: HTTP {response.status_code}; "
+                  f"workflow={url.rsplit('/', 2)[-2]}; run_id={run_id}", flush=True)
             return {
                 "success": True,
                 "uuid": myuuid,
@@ -378,17 +380,27 @@ def generate_custom_client(params, full_url):
                 "platform": platform,
                 "log_url": github_data.get('html_url')
             }
-        else:
-            return {
-                "success": False,
-                "error": "GitHub rejected the start request",
-                "status_code": 500
-            }
-    except Exception as e:
+
+        try:
+            github_message = response.json().get('message', 'Unknown GitHub error')
+        except (ValueError, AttributeError):
+            github_message = f"HTTP {response.status_code}"
+        # Never log the dispatch payload: zip_url can contain sensitive data.
+        print(f"GitHub dispatch rejected: HTTP {response.status_code}; "
+              f"message={github_message}", flush=True)
         return {
             "success": False,
-            "error": f"Connection error: {str(e)}",
-            "status_code": 500
+            "error": "GitHub rejected the start request",
+            "github_status": response.status_code,
+            "github_message": github_message,
+            "status_code": 502
+        }
+    except requests.RequestException as exc:
+        print(f"GitHub dispatch connection failure: {type(exc).__name__}", flush=True)
+        return {
+            "success": False,
+            "error": "GitHub connection failure",
+            "status_code": 502
         }
 
 
@@ -408,9 +420,10 @@ def _get_run_status(uuid_val):
     except GithubRun.DoesNotExist:
         return {"found": False}
 
-    github_log_url = f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions/runs/{gh_run.github_run_id}"
+    github_log_url = (f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions/runs/{gh_run.github_run_id}"
+                      if gh_run.github_run_id else f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/actions")
 
-    if gh_run.status not in ['success', 'failure', 'cancelled', 'timed_out', 'skipped']:
+    if gh_run.github_run_id and gh_run.status not in ['success', 'failure', 'cancelled', 'timed_out', 'skipped']:
         headers = {
             "Authorization": f"Bearer {_settings.GHBEARER}",
             "Accept": "application/vnd.github+json"
@@ -452,7 +465,7 @@ def generator_view(request):
                     'log_url': result['log_url']
                 })
             else:
-                return JsonResponse({"error": result['error']}, status=result.get('status_code', 500))
+                return JsonResponse({k: result[k] for k in ("error", "github_status", "github_message") if k in result}, status=result.get("status_code", 500))
     else:
         form = GenerateForm(initial=magbel_form_defaults())
     #return render(request, 'maintenance.html')
