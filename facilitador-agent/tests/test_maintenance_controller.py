@@ -12,7 +12,7 @@ import maintenance_controller as m
 class ControllerTests(unittest.TestCase):
     def setUp(self):
         self.portal=Mock()
-        self.op={'id':'a'*32,'agent_id':'app1','hostname':'app1.test','previous_version':'2.0.6','target_version':'2.0.7'}
+        self.op={'id':'a'*32,'agent_id':'app1','hostname':'app1.test','previous_version':'2.0.7','target_version':'2.0.8'}
         self.remote=Mock(return_value={'Ok':True})
         self.controller=m.Controller(self.portal,['app1.test'],ROOT,remote=self.remote,pause=lambda _:None)
         self.states=[]

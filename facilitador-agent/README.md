@@ -1,3 +1,5 @@
+> Atualização de acompanhamento 2.0.8: [MONITORAMENTO-208.md](MONITORAMENTO-208.md). Worker genérico, prazo remoto de duas horas e recuperação de resultados desconhecidos.
+
 # Facilitador Agent Windows 2.0.2
 
 Instalação limpa e assinatura sem chave privada nos APPs: [INSTALACAO-DO-ZERO.md](INSTALACAO-DO-ZERO.md). O modo `-SignedLauncherPath` usa um launcher distribuído já assinado; o comportamento de assinatura local descrito abaixo fica como compatibilidade para a estação que possui a chave.
