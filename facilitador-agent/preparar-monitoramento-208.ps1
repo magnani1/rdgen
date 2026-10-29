@@ -42,32 +42,11 @@ $Signature=Set-AuthenticodeSignature -FilePath $Prepare -Certificate $Certificat
 if ($Signature.Status -ne 'Valid') {throw 'Assinatura do preparador não validada.'}
 & $Prepare -SourceRoot $Source -Destination $Package -CertificateThumbprint $CertificateThumbprint
 if (-not (Test-Path -LiteralPath (Join-Path $Package 'atualizar-manutencao-permanente.ps1'))) {throw 'Pacote não foi concluído.'}
-# Publica a cópia assinada fora do checkout e preserva o worker institucional.
-# Executar-TarefaLocal.ps1 continua junto ao worker no compartilhamento.
-$Worker=Join-Path $Source 'worker\Executar-WinRM.ps1'
-$Tokens=$null; $ParseErrors=$null
-$null=[Management.Automation.Language.Parser]::ParseFile($Worker,[ref]$Tokens,[ref]$ParseErrors)
-if ($ParseErrors.Count) {throw 'Worker não passou no parser PowerShell; publicação interrompida.'}
-if (-not (Test-Path -LiteralPath $WorkerTarget -PathType Leaf)) {throw 'Worker institucional existente não encontrado.'}
-if (-not (Test-Path -LiteralPath (Join-Path (Split-Path $WorkerTarget) 'Executar-TarefaLocal.ps1'))) {throw 'Runner institucional não encontrado junto ao worker.'}
-$Signature=Set-AuthenticodeSignature -FilePath $Worker -Certificate $Certificate -HashAlgorithm SHA256
-if ($Signature.Status -ne 'Valid') {throw 'Assinatura do worker não validada.'}
-$WorkerBackup=Join-Path (Split-Path $WorkerTarget) ('Executar-WinRM-before-208-'+$Stamp+'.ps1.bak')
-$Pending=$WorkerTarget+'.'+$Stamp+'.pending.ps1'
-try {
-    $BeforeWorker=(Get-FileHash -LiteralPath $WorkerTarget -Algorithm SHA256).Hash
-    Copy-Item -LiteralPath $WorkerTarget -Destination $WorkerBackup
-    Copy-Item -LiteralPath $Worker -Destination $Pending
-    $Copied=Get-AuthenticodeSignature -LiteralPath $Pending
-    if ($Copied.Status -ne 'Valid' -or $Copied.SignerCertificate.Thumbprint -ne $CertificateThumbprint) {throw 'Assinatura divergente após transporte.'}
-    if ((Get-FileHash -LiteralPath $Worker -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $Pending -Algorithm SHA256).Hash) {throw 'Hash do worker divergente após transporte.'}
-    if ((Get-FileHash -LiteralPath $WorkerTarget -Algorithm SHA256).Hash -ne $BeforeWorker) {throw 'Worker institucional mudou durante o preparo; publicação cancelada.'}
-    Move-Item -LiteralPath $Pending -Destination $WorkerTarget -Force
-    if ((Get-FileHash -LiteralPath $Worker -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $WorkerTarget -Algorithm SHA256).Hash) {throw 'Worker publicado divergente; confira o backup antes de continuar.'}
-} finally {
-    if (Test-Path -LiteralPath $Pending) {Remove-Item -LiteralPath $Pending -Force}
-}
-Write-Host "Worker publicado. Backup: $WorkerBackup"
+# Publica o worker e o guard como um pacote. Nao substituir apenas o worker.
+$Publisher=Join-Path $Source 'publicar-worker-serial.ps1'
+$Signature=Set-AuthenticodeSignature -FilePath $Publisher -Certificate $Certificate -HashAlgorithm SHA256
+if ($Signature.Status -ne 'Valid') {throw 'Assinatura do publicador nao validada.'}
+& $Publisher -Repo $Repo -CertificateThumbprint $CertificateThumbprint -Directory (Split-Path $WorkerTarget) -ConfirmarSemTrabalhos
 # Só a tarefa de manutenção é parada. Nenhum executor ou processo Python genérico.
 Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -ArgumentList $ServiceId -ScriptBlock {
     param($Id)

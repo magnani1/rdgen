@@ -52,9 +52,16 @@ $expirou = $false
 $taskName = 'Facilitador_' + [guid]::NewGuid().ToString('N')
 $remoteDir = "C:\Windows\Temp\$taskName"
 $finalizado = $false
-$lastLine = 0
 $avisouFallback = $false
 $avisouSucesso = $false
+function Get-CompleteLogLines {
+    param([string]$Text,[int]$Offset=0,[switch]$Final)
+    if ($Offset -gt $Text.Length) {$Offset=0}
+    $end=if ($Final) {$Text.Length} else {$Text.LastIndexOf("`n")+1}
+    if ($end -le $Offset) {return @{Offset=$Offset;Lines=@()}}
+    $part=$Text.Substring($Offset,$end-$Offset)
+    return @{Offset=$end;Lines=@($part -split "`r?`n" | Where-Object {$_ -ne ''})}
+}
 function Mostrar-LinhaAnalista([string]$Bruta) {
     if ([string]::IsNullOrWhiteSpace($Bruta)) { return }
     # Remove prefixos conhecidos, mas nunca descarta mensagens de outros fabricantes.
@@ -98,6 +105,9 @@ try {
             throw "Script PowerShell inválido (linha $($primeiro.Extent.StartLineNumber)): $($primeiro.Message)"
         }
     }
+    $guard = Join-Path $PSScriptRoot 'Executar-Guardado.ps1'
+    if (-not (Test-Path -LiteralPath $guard)) {throw 'Guard assinado ausente: publique o pacote completo.'}
+    if ((Get-AuthenticodeSignature -LiteralPath $guard).Status -ne 'Valid') {throw 'Assinatura do guard nao validada.'}
     $runner = Join-Path $PSScriptRoot 'Executar-TarefaLocal.ps1'
     if (-not (Test-Path -LiteralPath $runner)) { throw "Runner assinado ausente: $runner" }
     $alvo = Resolve-DestinoWinRM $ComputerName
@@ -126,54 +136,53 @@ try {
     Invoke-Command -Session $session -ScriptBlock {
         param($dir,$log)
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        if ($log) {
-            New-Item -ItemType Directory -Path (Split-Path $log) -Force | Out-Null
-            Set-Content -LiteralPath $log -Value '' -Encoding UTF8
-        }
+        # O arquivo legado so pode ser tocado pelo guard apos adquirir a exclusao.
     } -ArgumentList $remoteDir,$RemoteLogPath
     $remoteScript = "$remoteDir\$(Split-Path $FilePath -Leaf)"
     Copy-Item -LiteralPath $FilePath -Destination $remoteScript -ToSession $session -Force
+    Copy-Item -LiteralPath $guard -Destination "$remoteDir\Executar-Guardado.ps1" -ToSession $session -Force
     Copy-Item -LiteralPath $runner -Destination "$remoteDir\Executar-TarefaLocal.ps1" -ToSession $session -Force
     Invoke-Command -Session $session -ScriptBlock {
-        param($dir,$scriptPath,$scanner,$task,$timeout)
+        param($dir,$scriptPath,$scanner,$task,$timeout,$legacy)
         @{ Script=$scriptPath; NomeScanner=$scanner } | ConvertTo-Json | Set-Content -LiteralPath "$dir\params.json" -Encoding UTF8
         $engine = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
         $pwsh = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
         if (Test-Path -LiteralPath $pwsh) { $engine = $pwsh }
-        $command = '""{0}" -NoProfile -NonInteractive -File "{1}" -Config "{2}" 1>"{3}" 2>&1"' -f $engine,"$dir\Executar-TarefaLocal.ps1","$dir\params.json","$dir\processo.log"
+        @{Engine=$engine;Task=$task;LegacyLog=$legacy} | ConvertTo-Json | Set-Content -LiteralPath "$dir\guard.json" -Encoding UTF8
+        $command = '""{0}" -NoProfile -NonInteractive -File "{1}" -Config "{2}" 1>"{3}" 2>&1"' -f $engine,"$dir\Executar-Guardado.ps1","$dir\guard.json","$dir\guard-process.log"
         $action = New-ScheduledTaskAction -Execute $env:ComSpec -Argument ('/d /s /c ' + $command)
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds $timeout)
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
         Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings -Force | Out-Null
         Start-ScheduledTask -TaskName $task
-    } -ArgumentList $remoteDir,$remoteScript,$NomeScanner,$taskName,$TimeoutSeconds
+    } -ArgumentList $remoteDir,$remoteScript,$NomeScanner,$taskName,$TimeoutSeconds,$RemoteLogPath
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $result = $null
-    $fonteAnterior = ''
+    $Offsets=@{}
     do {
         Start-Sleep -Seconds 2
         $result = Invoke-Command -Session $session -ScriptBlock {
-            param($task,$log,$dir)
+            param($task,$dir)
             $t = Get-ScheduledTask -TaskName $task -ErrorAction Stop
             $i = Get-ScheduledTaskInfo -TaskName $task -ErrorAction Stop
-            $lines = @()
-            $fonte = ''
-            if ($log -and (Test-Path -LiteralPath $log) -and (Get-Item -LiteralPath $log).Length -gt 0) {
-                $fonte = $log
-            } elseif (Test-Path -LiteralPath "$dir\processo.log") {
-                $fonte = "$dir\processo.log"
+            $channels=@{}
+            # Preferir o snapshot privado do script; stdout e stderr permanecem preservados.
+            $script=Join-Path $dir 'script.log'
+            if (-not (Test-Path -LiteralPath $script) -or (Get-Item -LiteralPath $script).Length -eq 0) {$script=Join-Path $dir 'legacy-script.log'}
+            $names=if ((Test-Path -LiteralPath $script) -and (Get-Item -LiteralPath $script).Length -gt 0) {@('gate.log',(Split-Path $script -Leaf),'stderr.log','guard-process.log')} else {@('gate.log','processo.log','stderr.log','guard-process.log')}
+            foreach ($name in $names) {
+                $path=Join-Path $dir $name
+                if (Test-Path -LiteralPath $path) {$channels[$name]=[IO.File]::ReadAllText($path)}
             }
-            if ($fonte) { $lines = @(Get-Content -LiteralPath $fonte -Encoding UTF8) }
-            [pscustomobject]@{State=[string]$t.State; Code=[long]$i.LastTaskResult; LastRun=$i.LastRunTime; Lines=$lines; Source=$fonte}
-        } -ArgumentList $taskName,$RemoteLogPath,$remoteDir
-        $lines = @($result.Lines | Where-Object { $null -ne $_ })
-        if ($result.Source -ne $fonteAnterior) { $lastLine = 0; $fonteAnterior = $result.Source }
-        if ($lines.Count -lt $lastLine) { $lastLine = 0 }
-        for ($n=$lastLine; $n -lt $lines.Count; $n++) {
-            $line = [string]$lines[$n]
-            if ($line.Trim()) { Mostrar-LinhaAnalista $line }
+            [pscustomobject]@{State=[string]$t.State; Code=[long]$i.LastTaskResult; LastRun=$i.LastRunTime; Channels=$channels}
+        } -ArgumentList $taskName,$remoteDir
+        $done=$result.LastRun.Year -gt 2000 -and $result.State -notin @('Running','Queued') -and $result.Code -ne 267009
+        foreach ($entry in $result.Channels.GetEnumerator()) {
+            $name=[string]$entry.Key; $text=[string]$entry.Value
+            $read=Get-CompleteLogLines -Text $text -Offset ([int]$Offsets[$name]) -Final:$done
+            foreach ($line in $read.Lines) {if ($line.Trim()) {Mostrar-LinhaAnalista $line}}
+            $Offsets[$name]=$read.Offset
         }
-        $lastLine = $lines.Count
         if ($result.LastRun.Year -gt 2000 -and $result.State -notin @('Running','Queued') -and $result.Code -ne 267009) {
             $finalizado = $true
             break
@@ -183,7 +192,7 @@ try {
     # processo.log fica preservado para investigacao em caso de erro.
     # Nao despejar novamente linhas que ja chegaram via RemoteLogPath.
     if ([long]$result.Code -notin @(0,3010,1641,1806)) {
-        if (-not $RemoteLogPath -or $lastLine -eq 0) {
+        if (-not $RemoteLogPath -or -not $Offsets.Count) {
             $diagnostico = Invoke-Command -Session $session -ScriptBlock {
                 param($dir)
                 if (Test-Path -LiteralPath "$dir\processo.log") {
@@ -217,7 +226,7 @@ try {
                 Invoke-Command -Session $session -ScriptBlock {
                     param($task,$dir)
                     Unregister-ScheduledTask -TaskName $task -Confirm:$false
-                    Remove-Item -LiteralPath $dir -Recurse -Force
+                    # Logs exclusivos preservados para auditoria; limpeza por retencao separada.
                 } -ArgumentList $taskName,$remoteDir
             } catch { Write-Log "[AVISO] Limpeza pendente: $taskName" }
         } else {
