@@ -172,11 +172,7 @@ try {
             $names=if ((Test-Path -LiteralPath $script) -and (Get-Item -LiteralPath $script).Length -gt 0) {@('gate.log',(Split-Path $script -Leaf),'stderr.log','guard-process.log')} else {@('gate.log','processo.log','stderr.log','guard-process.log')}
             foreach ($name in $names) {
                 $path=Join-Path $dir $name
-                if (Test-Path -LiteralPath $path) {
-                    $stream=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
-                    $reader=[IO.StreamReader]::new($stream,[Text.Encoding]::UTF8,$true)
-                    try {$channels[$name]=$reader.ReadToEnd()} finally {$reader.Dispose()}
-                }
+                if (Test-Path -LiteralPath $path) {$channels[$name]=[IO.File]::ReadAllText($path)}
             }
             [pscustomobject]@{State=[string]$t.State; Code=[long]$i.LastTaskResult; LastRun=$i.LastRunTime; Channels=$channels}
         } -ArgumentList $taskName,$remoteDir

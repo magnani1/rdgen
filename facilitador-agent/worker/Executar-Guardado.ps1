@@ -93,7 +93,9 @@ try {
         if ($Process.HasExited -and -not $Live.Count -and -not (Test-InstallerBusy)) {break}
         Start-Sleep -Seconds 2
     } while ($true)
-    $Process.WaitForExit(); $Code=$Process.ExitCode
+    $Process.WaitForExit(); $Process.Refresh()
+    if ($null -eq $Process.ExitCode) {throw 'Codigo final do runner nao confirmado.'}
+    $Code=[int]$Process.ExitCode
     Copy-OwnedLegacyLog
     $Confirmed=$true
     Write-Gate "Tarefa e filhos observados encerrados. Codigo: $Code."
