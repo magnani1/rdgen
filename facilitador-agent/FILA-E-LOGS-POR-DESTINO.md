@@ -41,3 +41,18 @@ O agente continua 2.0.8; esta correção é no worker institucional lido a cada 
 5. Conferir perda de contato e marcador persistente com um script inofensivo: não pode iniciar nova instalação sem conferência.
 
 Testes de fila executados em Python; PowerShell inclui parser, leitura incremental e exclusão de handles. Aceite real de WinRM/ScheduledTask/assinatura/instaladores continua necessário.
+
+## Ferramentas de aceite e auditoria
+
+`testar-fila-guardada.ps1` prepara duas ações inofensivas assinadas (`homologacao/Teste-Fila-A.ps1` e B), solicita ambas ao worker e confere intervalos sem sobreposição e logs isolados. Executar uma cópia assinada fora do checkout, na estação com chave privada:
+
+```powershell
+& $Script -ComputerName 'CLIENTE-HOMOLOGACAO.tjpb.jus.br' `
+    -Repo '\\facilitadorapp1\c$\Magbel\rdgen' `
+    -CertificateThumbprint '828D73E9B099D50DE42443ACEF7E224EE8D52A5D' `
+    -ConfirmarDestinoSemInstalacoes
+```
+
+Substitua CLIENTE-HOMOLOGACAO por um cliente livre, com WinRM previamente validado a partir da estação de assinatura. Não usar a própria SEDE153729 enquanto a consulta WinRM de loopback continuar falhando. Esta ferramenta não cadastra ações no painel nem instala scanners. Ela testa o guard real via WinRM; a fila da API tem testes próprios. Se expirar, preserva evidências e não mata processos. Conferir Get-Job e tarefas no cliente antes de repetir.
+
+`auditar-script-instalacao.ps1 -Path <arquivo.ps1>` analisa AST sem executar o instalador. Relata hash e linhas/comandos que exigem revisão, sem imprimir argumentos ou credenciais. Não modifica o Kodak, não detecta todas as formas de execução e não prova ausência de risco. Assinar a cópia se a política da estação exigir.
