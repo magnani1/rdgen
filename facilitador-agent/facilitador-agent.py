@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.7"
+VERSION = "2.0.8"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -62,6 +62,9 @@ def api(method, url, **kwargs):
     return response
 
 TIMEOUT_EXECUCAO = 600
+# Prazo remoto separado do executor local e alinhado ao worker. O agente
+# aguarda ainda 60s para o worker devolver o resultado/diagnóstico final.
+REMOTE_TIMEOUT_SECONDS = max(30, min(14400, int(os.environ.get('AGENT_REMOTE_TIMEOUT_SECONDS', '7200'))))
 
 
 def consultar_sessoes_windows(host):
@@ -501,17 +504,19 @@ def executar_remota(job_id, payload, script_path):
         try:
             cmd = ["pwsh", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "RemoteSigned",
                    "-File", EXECUTAR_WINRM, "-ComputerName", alvo, "-FilePath", script_path,
-                   "-RemoteLogPath", remote_log_path, "-LogFile", log_path, "-Programa", script_name]
+                   "-RemoteLogPath", remote_log_path, "-LogFile", log_path, "-Programa", script_name,
+                   "-TimeoutSeconds", str(REMOTE_TIMEOUT_SECONDS)]
             with open(os.path.join(LOG_DIR, f"watcher_{job_id}.txt"), "a", encoding="utf-8") as watcher_log:
                 procs.append((subprocess.Popen(cmd, stdout=watcher_log, stderr=subprocess.STDOUT,
                                               text=True, encoding="utf-8", errors="replace"), alvo))  # ← UTF-8
         except Exception as e:
             enviar_log(job_id, f"[ERRO] Falha iniciando {alvo}: {e}")
 
-    offset = 0; start_time = time.time(); timeout_hit = False; marker_at = None
+    offset = 0; start_time = time.monotonic(); timeout_hit = False; next_notice = 30
     while any(p.poll() is None for p, _ in procs):
-        if time.time() - start_time > TIMEOUT_EXECUCAO:
-            enviar_log(job_id, "[AVISO] Timeout. Matando processos.")
+        elapsed = time.monotonic() - start_time
+        if elapsed > REMOTE_TIMEOUT_SECONDS + 60:
+            enviar_log(job_id, "[RESULTADO DESCONHECIDO] Prazo do acompanhamento excedido; encerrando somente o watcher no agente. O instalador remoto pode continuar; conferir antes de repetir.")
             for p, _ in procs:
                 if p.poll() is None:
                     try: p.kill()
@@ -519,19 +524,11 @@ def executar_remota(job_id, payload, script_path):
             timeout_hit = True; break
 
         offset, novo = _ler_novo_e_enviar(job_id, log_path, offset)
-        if novo and marker_at is None:
-            up = novo.upper()
-            if any(m in up for m in SUCCESS_MARKERS):
-                marker_at = time.time()
-                enviar_log(job_id, "[INFO] Marker de conclusão detectado no log.")
-        # Conclusão confirmada há 30s e o watcher ainda preso? Encerra por conta própria.
-        if marker_at and (time.time() - marker_at > 30):
-            enviar_log(job_id, "[INFO] Conclusão confirmada no log; encerrando watcher.")
-            for p, _ in procs:
-                if p.poll() is None:
-                    try: p.kill()
-                    except Exception: pass
-            break
+        if novo:
+            next_notice = elapsed + 30
+        elif elapsed >= next_notice:
+            enviar_log(job_id, f"[ACOMPANHAMENTO] Watcher ativo há {int(elapsed)}s; aguardando novas linhas e resultado da tarefa remota. Isso não confirma progresso do instalador.")
+            next_notice = elapsed + 30
         time.sleep(2)
     offset, _ = _ler_novo_e_enviar(job_id, log_path, offset)
 
@@ -544,8 +541,8 @@ def executar_remota(job_id, payload, script_path):
 
     if timeout_hit:
         resultado = {"ok": False, "uncertain": True, "linhas": linhas, "erro": "Timeout: conferir execução remota antes de repetir"}
-    elif len(procs) != len(payload["alvos"]) or (not marker_at and any(p.poll() not in (0,None) for p,_ in procs)):
-        resultado = {"ok": False, "linhas": linhas, "erro": "Executar-WinRM falhou; conferir log do watcher"}
+    elif len(procs) != len(payload["alvos"]) or any(p.poll() != 0 for p,_ in procs):
+        resultado = {"ok": False, "uncertain": True, "linhas": linhas, "erro": "Watcher sem conclusão confirmada; conferir tarefa e log no cliente antes de repetir"}
     else:
         resultado = {"ok": True, "linhas": linhas}
     resultado["display_name"] = consultar_display_name(payload.get("usuario", ""))

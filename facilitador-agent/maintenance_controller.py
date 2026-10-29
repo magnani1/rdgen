@@ -13,8 +13,8 @@ from urllib.parse import urlsplit
 
 from fleet_manager import FleetError, Portal, targets
 
-VERSION = '2.0.7'
-SOURCE_HASH = '0ed87034b19c0a525915dd0baf08b709acdefeefc624e8902a0be8503b9ee22c'
+VERSION = '2.0.8'
+SOURCE_HASH = 'e981aedb4db1a6cbfbcfc1e0c64f049d24d9591142ea4fae08f80be947d884ab'
 
 
 def source_hash(path):
@@ -143,7 +143,7 @@ def main(argv=None):
     hosts = [host for host, _ in targets(args.hosts)]
     package = args.package.resolve()
     if source_hash(package/'facilitador-agent.py') != SOURCE_HASH:
-        raise FleetError('Pacote de código fora da referência 2.0.7.')
+        raise FleetError('Pacote de código fora da referência 2.0.8.')
     helper = package/'manutencao-agente.ps1'
     # Validação da confiança Authenticode no próprio Windows; sem bypass de política.
     encoded_path = base64.b64encode(str(helper).encode('utf-8')).decode('ascii')

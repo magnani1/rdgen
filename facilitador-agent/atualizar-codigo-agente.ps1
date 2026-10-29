@@ -8,16 +8,16 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not $ConfirmarDrenadoSemTrabalhos) { throw 'Drene, confira zero trabalhos e pare a tarefa antes de atualizar.' }
 if ((Get-AuthenticodeSignature -FilePath $PSCommandPath).Status -ne 'Valid') { throw 'Assine a cópia deste atualizador na estação administrativa.' }
-# Agente 2.0.7 revisado. Canonicalização: UTF-8 sem BOM, LF e uma quebra final.
+# Agente 2.0.8 revisado. Canonicalização: UTF-8 sem BOM, LF e uma quebra final.
 # A referência não é recebida do painel nem de um arquivo de hash não autenticado.
-$ExpectedHash = '0ed87034b19c0a525915dd0baf08b709acdefeefc624e8902a0be8503b9ee22c'
+$ExpectedHash = 'e981aedb4db1a6cbfbcfc1e0c64f049d24d9591142ea4fae08f80be947d884ab'
 $Text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).ProviderPath)
 $Text = $Text.Replace("`r`n", "`n").TrimEnd([char[]]"`r`n") + "`n"
 $Bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
 $Hasher = [Security.Cryptography.SHA256]::Create()
 try { $Hash = [BitConverter]::ToString($Hasher.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant() }
 finally { $Hasher.Dispose() }
-if ($Hash -ne $ExpectedHash) { throw 'Código diferente do agente 2.0.7 revisado. Não será instalado.' }
+if ($Hash -ne $ExpectedHash) { throw 'Código diferente do agente 2.0.8 revisado. Não será instalado.' }
 
 $HostId = $ComputerName.Split('.')[0]
 Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -ArgumentList $HostId,$Bytes,$ExpectedHash -ScriptBlock {
@@ -45,8 +45,8 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
     finally { $Hasher.Dispose() }
     if ($Hash -ne $ExpectedHash) { throw 'Hash divergente no destino.' }
     $Current = [IO.File]::ReadAllText($Target).Replace("`r`n","`n").TrimEnd([char[]]"`r`n") + "`n"
-    if ($Current -eq [Text.Encoding]::UTF8.GetString($Bytes)) { throw 'Agente 2.0.7 já instalado. Confira o painel; não repita a atualização.' }
-    if ($Current -notmatch '(?m)^VERSION\s*=\s*["''](2\.0\.6)["'']\s*$') { throw 'Esta entrega atualiza apenas o agente 2.0.6 para 2.0.7.' }
+    if ($Current -eq [Text.Encoding]::UTF8.GetString($Bytes)) { throw 'Agente 2.0.8 já instalado. Confira o painel; não repita a atualização.' }
+    if ($Current -notmatch '(?m)^VERSION\s*=\s*["''](2\.0\.7)["'']\s*$') { throw 'Esta entrega atualiza apenas o agente 2.0.7 para 2.0.8.' }
     $PreviousVersion = $Matches[1]
     $Config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($Config.AGENT_BASE_DIR -ine $Root -or -not $Config.AGENT_PYTHON) { throw 'Configuração não corresponde ao runtime.' }
@@ -74,7 +74,7 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
         $Replaced = $true
         if ((Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedHash) { throw 'Conferência do código instalado falhou.' }
         Start-ScheduledTask -TaskName $TaskName
-        [pscustomobject]@{Computer=$env:COMPUTERNAME;AgentVersion='2.0.7';PreviousVersion=$PreviousVersion;Python=$Python;IdentityPreserved=$true;ConfigPreserved=$true;Backup=$Previous;Activation='Aguardar heartbeat 2.0.7, conferir Python e prontidão; testar antes de ativar.'}
+        [pscustomobject]@{Computer=$env:COMPUTERNAME;AgentVersion='2.0.8';PreviousVersion=$PreviousVersion;Python=$Python;IdentityPreserved=$true;ConfigPreserved=$true;Backup=$Previous;Activation='Aguardar heartbeat 2.0.8, conferir Python e prontidão; testar antes de ativar.'}
     } catch {
         if ($Replaced) { Write-Warning "Código trocado; confira tarefa/painel antes de repetir. Backup anterior: $Previous" }
         throw

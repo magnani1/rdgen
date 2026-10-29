@@ -15,7 +15,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(payload['python_version'],agent.platform.python_version())
         self.assertEqual(payload['python_bits'],agent.sys.maxsize.bit_length()+1)
         self.assertEqual(payload['requests_version'],agent.requests.__version__)
-        self.assertEqual(payload['version'],'2.0.7')
+        self.assertEqual(payload['version'],'2.0.8')
         self.assertRegex(payload['boot_id'],r'^[a-f0-9]{32}$')
         self.assertEqual(payload['boot_id'],agent.BOOT_ID)
         self.assertEqual(set(agent.runtime_versions()),{'python_version','python_bits','requests_version'})
