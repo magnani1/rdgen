@@ -45,3 +45,20 @@ try {
     $Two=[IO.File]::Open($Temp,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
 } finally {if ($One) {$One.Dispose()};if ($Two) {$Two.Dispose()};Remove-Item -LiteralPath $Temp -Force -ErrorAction SilentlyContinue}
 Write-Host 'Linhas incompletas, truncamento, parser e exclusao de handles: OK'
+# Snapshot legado: cada leitura acrescenta somente dados novos ao arquivo privado.
+$GuardFile=Join-Path (Split-Path $File) 'Executar-Guardado.ps1'
+$GuardAst=[Management.Automation.Language.Parser]::ParseFile($GuardFile,[ref]$Tokens,[ref]$Errors)
+$CopyFunction=$GuardAst.Find({param($Node) $Node -is [Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq 'Copy-OwnedLegacyLog'},$true)
+. ([scriptblock]::Create($CopyFunction.Extent.Text))
+$Dir=Join-Path ([IO.Path]::GetTempPath()) ('magbel-log-test-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $Dir | Out-Null
+$Settings=[pscustomobject]@{LegacyLog=(Join-Path $Dir 'legacy.txt')};$script:LegacyOffset=0
+try {
+    [IO.File]::WriteAllText($Settings.LegacyLog,"primeira`n",[Text.UTF8Encoding]::new($false))
+    Copy-OwnedLegacyLog;Copy-OwnedLegacyLog
+    [IO.File]::AppendAllText($Settings.LegacyLog,"segunda`n",[Text.UTF8Encoding]::new($false))
+    Copy-OwnedLegacyLog
+    $Actual=[IO.File]::ReadAllText((Join-Path $Dir 'legacy-script.log'))
+    if ($Actual -ne "primeira`nsegunda`n") {throw 'Snapshot duplicou ou perdeu linhas.'}
+} finally {Remove-Item -LiteralPath $Dir -Recurse -Force}
+Write-Host 'Snapshot legado privado e append-only sem repeticao: OK'

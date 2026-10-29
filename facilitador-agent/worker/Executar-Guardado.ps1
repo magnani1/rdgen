@@ -9,7 +9,7 @@ $Settings=Get-Content -LiteralPath $Config -Raw -Encoding UTF8 | ConvertFrom-Jso
 $Dir=Split-Path -LiteralPath $Config
 $Root=Join-Path $env:ProgramData 'Magbel\ExecutionGate'
 $Marker=Join-Path $Root 'active.json'
-$Lock=$null; $Process=$null; $Confirmed=$false; $OwnedMarker=$false; $Code=1
+$Lock=$null; $Process=$null; $Confirmed=$false; $OwnedMarker=$false; $Code=1; $script:LegacyOffset=0
 function Write-Gate([string]$Text) {
     Add-Content -LiteralPath (Join-Path $Dir 'gate.log') -Value ('[{0}] {1}' -f (Get-Date -Format HH:mm:ss),$Text) -Encoding UTF8
 }
@@ -24,8 +24,15 @@ function Test-InstallerBusy {
 function Copy-OwnedLegacyLog {
     if ($Settings.LegacyLog -and (Test-Path -LiteralPath $Settings.LegacyLog -PathType Leaf)) {
         # Snapshot exclusivo desta tarefa, somente durante a posse do gate.
-        $Text=[IO.File]::ReadAllText([string]$Settings.LegacyLog)
-        if ($Text.Length) {[IO.File]::WriteAllText((Join-Path $Dir 'legacy-script.log'),$Text,[Text.UTF8Encoding]::new($false))}
+        $Stream=[IO.File]::Open([string]$Settings.LegacyLog,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+        $Reader=[IO.StreamReader]::new($Stream,[Text.Encoding]::UTF8,$true)
+        try {$Text=$Reader.ReadToEnd()} finally {$Reader.Dispose()}
+        if ($Text.Length -lt $script:LegacyOffset) {$script:LegacyOffset=0}
+        # Snapshot append-only: reler a fonte nao regrava o que ja foi encaminhado.
+        if ($Text.Length -gt $script:LegacyOffset) {
+            [IO.File]::AppendAllText((Join-Path $Dir 'legacy-script.log'),$Text.Substring($script:LegacyOffset),[Text.UTF8Encoding]::new($false))
+            $script:LegacyOffset=$Text.Length
+        }
     }
 }
 try {
@@ -65,7 +72,9 @@ try {
     $Arguments='-NoProfile -NonInteractive -File "{0}" -Config "{1}"' -f (Join-Path $Dir 'Executar-TarefaLocal.ps1'),(Join-Path $Dir 'params.json')
     $Process=Start-Process -FilePath ([string]$Settings.Engine) -ArgumentList $Arguments -PassThru -NoNewWindow `
         -RedirectStandardOutput (Join-Path $Dir 'processo.log') -RedirectStandardError (Join-Path $Dir 'stderr.log')
-    $Tracked=@{}; $Tracked[$Process.Id]=[datetime]$Process.StartTime
+    $Tracked=@{}
+    $Created=Get-CimInstance Win32_Process -Filter ("ProcessId="+$Process.Id) -ErrorAction Stop
+    if ($Created) {$Tracked[$Process.Id]=[datetime]$Created.CreationDate}
     do {
         Copy-OwnedLegacyLog
         # Inclui filhos conhecidos para nao liberar o gate apenas porque o launcher terminou.
