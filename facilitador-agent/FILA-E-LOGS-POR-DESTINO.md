@@ -62,3 +62,13 @@ Substitua CLIENTE-HOMOLOGACAO por um cliente livre, com WinRM previamente valida
 O teste imprime a pasta de evidências ao iniciar e os estados dos jobs a cada 15 segundos. Antes de lançar a exceção, grava `job-status.json` e `<id>-job.txt` com os estados, motivos e streams dos jobs. Isso é necessário quando o teste é iniciado com `pwsh arquivo.ps1`: ao terminar o processo filho, Get-Job na janela pai não recupera seus jobs. Erros não terminantes em jobs Completed também impedem declarar aceite.
 
 Uma falha não encerra tarefas remotas nem apaga o gate. Não repetir o aceite antes de conferir A.log/B.log, job-status.json e a pasta da tarefa no cliente. Logs da tentativa anterior a essa correção podem não conter os streams dos jobs, mas A.log/B.log e logs remotos devem ser preservados. A correção é somente no diagnóstico; não resolve por si só falhas de WinRM, assinatura, runner ou gate.
+
+## Leitura de logs em uso — live-log-sharing-r2
+
+O teste real confirmou a exclusão e os logs privados no APP3, mas o watcher falhava ao abrir guard-process.log mantido pela redireção do cmd. O worker passa a abrir logs com FileShare.ReadWrite/Delete e a adiar somente erros de compartilhamento/bloqueio (Win32 32/33), sem avançar o cursor nem simular arquivo vazio. Arquivo ainda ausente também pode aparecer na próxima consulta. Erros reais, como acesso negado, continuam visíveis. O arquivo guard-process.log é coletado apenas quando a tarefa termina. O guard usa a mesma política para o snapshot legado.
+
+Novos testes exercitam leitura com gravador aberto, bloqueio exclusivo, retomada, linhas parciais, arquivo ausente e propagação de erro real. Como não há PowerShell neste ambiente de desenvolvimento, precisam ser executados no Windows; não considerar o aceite completo só pelo código revisado.
+
+Com um novo certificado de assinatura, testar primeiro numa cópia isolada da pasta facilitador-agent fora do checkout: copiar o runner institucional assinado para worker/Executar-TarefaLocal.ps1; assinar worker, guard, tests/test_worker_logs.ps1 e testar-fila-guardada.ps1 com o novo certificado; rodar o teste de logs e depois o aceite com -Worker apontando à cópia local. O novo editor precisa ser confiável na estação e no cliente de homologação.
+
+Não substituir o worker compartilhado com um novo editor até validar a distribuição da confiança aos executores e clientes que o utilizarão. Não desabilitar revogação, apagar gate, matar instaladores ou reinscrever agentes para corrigir um erro de leitura do watcher. Agente continua 2.0.8, sem mudanças no backend ou no Docker.

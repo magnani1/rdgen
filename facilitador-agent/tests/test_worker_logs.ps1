@@ -45,3 +45,44 @@ try {
     $Two=[IO.File]::Open($Temp,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
 } finally {if ($One) {$One.Dispose()};if ($Two) {$Two.Dispose()};Remove-Item -LiteralPath $Temp -Force -ErrorAction SilentlyContinue}
 Write-Host 'Linhas incompletas, truncamento, parser e exclusao de handles: OK'
+# Regressao: o watcher deve ler com o gravador aberto ou adiar uma disputa exclusiva.
+# As duas copias do leitor sao exercitadas sem carregar/executar o worker/guard inteiro.
+foreach ($ReaderFile in @($File,(Join-Path (Split-Path $File) 'Executar-Guardado.ps1'))) {
+    $Tokens=$null;$Errors=$null
+    $ReaderAst=[Management.Automation.Language.Parser]::ParseFile($ReaderFile,[ref]$Tokens,[ref]$Errors)
+    if ($Errors.Count) {throw "Parser recusou $ReaderFile"}
+    $Definition=$ReaderAst.Find({param($Node) $Node -is [Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq 'Read-SharedLog'},$true)
+    if (-not $Definition) {throw 'Leitor compartilhado ausente.'}
+    . ([scriptblock]::Create($Definition.Extent.Text))
+    $Temp=Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N')+'.log')
+    $Handle=$null
+    try {
+        $Handle=[IO.File]::Open($Temp,[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite)
+        $Bytes=[Text.Encoding]::UTF8.GetBytes("primeira`nsegunda parcial")
+        $Handle.Write($Bytes,0,$Bytes.Length);$Handle.Flush()
+        $Read=Read-SharedLog -Path $Temp
+        if ($Read.State -ne 'read' -or $Read.Text -ne "primeira`nsegunda parcial") {throw 'Leitura falhou com gravador compartilhado aberto.'}
+        $First=Get-CompleteLogLines -Text $Read.Text
+        if ($First.Lines.Count -ne 1 -or $First.Lines[0] -ne 'primeira') {throw 'Leitura antecipou linha parcial.'}
+        $Bytes=[Text.Encoding]::UTF8.GetBytes(" completa`n")
+        $Handle.Write($Bytes,0,$Bytes.Length);$Handle.Flush()
+        $Next=Get-CompleteLogLines -Text (Read-SharedLog -Path $Temp).Text -Offset $First.Offset
+        if ($Next.Lines.Count -ne 1 -or $Next.Lines[0] -ne 'segunda parcial completa') {throw 'Cursor duplicou/cortou linha.'}
+        $Handle.Dispose();$Handle=$null
+        $Handle=[IO.File]::Open($Temp,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        $Read=Read-SharedLog -Path $Temp
+        if ($Read.State -ne 'busy' -or $null -ne $Read.Text) {throw 'Arquivo exclusivo deveria adiar leitura sem simular arquivo vazio.'}
+        $Handle.Dispose();$Handle=$null
+        if ((Read-SharedLog -Path $Temp).State -ne 'read') {throw 'Leitura nao retomou apos liberar o arquivo.'}
+        if ((Read-SharedLog -Path ($Temp+'.missing')).State -ne 'missing') {throw 'Arquivo ainda ausente nao tratado.'}
+        $Directory=$Temp+'.directory'
+        New-Item -ItemType Directory -Path $Directory | Out-Null
+        try {
+            $Propagated=$false
+            try {Read-SharedLog -Path $Directory | Out-Null} catch {$Propagated=$true}
+            if (-not $Propagated) {throw 'Erro real de acesso foi indevidamente tratado como disputa temporaria.'}
+        } finally {Remove-Item -LiteralPath $Directory -Force}
+
+    } finally {if ($Handle) {$Handle.Dispose()};Remove-Item -LiteralPath $Temp -Force -ErrorAction SilentlyContinue}
+}
+Write-Host 'Leitura com gravador aberto, disputa exclusiva, retomada e cursor incremental: OK'

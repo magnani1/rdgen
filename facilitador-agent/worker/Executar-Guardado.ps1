@@ -21,12 +21,35 @@ function Test-InstallerBusy {
     })
     return $Clients.Count -gt 0
 }
+function Read-SharedLog {
+    param([Parameter(Mandatory)][string]$Path)
+    $Stream=$null;$Reader=$null
+    try {
+        $Sharing=[IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        $Stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,$Sharing)
+        $Reader=[IO.StreamReader]::new($Stream,[Text.Encoding]::UTF8,$true)
+        return [pscustomobject]@{State='read';Text=$Reader.ReadToEnd()}
+    } catch {
+        $Cause=$_.Exception
+        while ($Cause.InnerException) {$Cause=$Cause.InnerException}
+        $NativeCode=$Cause.HResult -band 0xffff
+        if ($Cause -is [IO.IOException] -and $NativeCode -in @(32,33)) {
+            return [pscustomobject]@{State='busy';Text=$null}
+        }
+        if ($Cause -is [IO.FileNotFoundException] -or $Cause -is [IO.DirectoryNotFoundException]) {
+            return [pscustomobject]@{State='missing';Text=$null}
+        }
+        throw
+    } finally {
+        if ($Reader) {$Reader.Dispose()} elseif ($Stream) {$Stream.Dispose()}
+    }
+}
 function Copy-OwnedLegacyLog {
     if ($Settings.LegacyLog -and (Test-Path -LiteralPath $Settings.LegacyLog -PathType Leaf)) {
         # Snapshot exclusivo desta tarefa, somente durante a posse do gate.
-        $Stream=[IO.File]::Open([string]$Settings.LegacyLog,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
-        $Reader=[IO.StreamReader]::new($Stream,[Text.Encoding]::UTF8,$true)
-        try {$Text=$Reader.ReadToEnd()} finally {$Reader.Dispose()}
+        $Read=Read-SharedLog -Path ([string]$Settings.LegacyLog)
+        if ($Read.State -ne 'read') {return}
+        $Text=$Read.Text
         if ($Text.Length -lt $script:LegacyOffset) {$script:LegacyOffset=0}
         # Snapshot append-only: reler a fonte nao regrava o que ja foi encaminhado.
         if ($Text.Length -gt $script:LegacyOffset) {
