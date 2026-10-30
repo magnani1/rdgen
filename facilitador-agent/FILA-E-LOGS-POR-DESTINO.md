@@ -56,3 +56,9 @@ Testes de fila executados em Python; PowerShell inclui parser, leitura increment
 Substitua CLIENTE-HOMOLOGACAO por um cliente livre, com WinRM previamente validado a partir da estação de assinatura. Não usar a própria SEDE153729 enquanto a consulta WinRM de loopback continuar falhando. Esta ferramenta não cadastra ações no painel nem instala scanners. Ela testa o guard real via WinRM; a fila da API tem testes próprios. Se expirar, preserva evidências e não mata processos. Conferir Get-Job e tarefas no cliente antes de repetir.
 
 `auditar-script-instalacao.ps1 -Path <arquivo.ps1>` analisa AST sem executar o instalador. Relata hash e linhas/comandos que exigem revisão, sem imprimir argumentos ou credenciais. Não modifica o Kodak, não detecta todas as formas de execução e não prova ausência de risco. Assinar a cópia se a política da estação exigir.
+
+## Diagnóstico de falhas no aceite
+
+O teste imprime a pasta de evidências ao iniciar e os estados dos jobs a cada 15 segundos. Antes de lançar a exceção, grava `job-status.json` e `<id>-job.txt` com os estados, motivos e streams dos jobs. Isso é necessário quando o teste é iniciado com `pwsh arquivo.ps1`: ao terminar o processo filho, Get-Job na janela pai não recupera seus jobs. Erros não terminantes em jobs Completed também impedem declarar aceite.
+
+Uma falha não encerra tarefas remotas nem apaga o gate. Não repetir o aceite antes de conferir A.log/B.log, job-status.json e a pasta da tarefa no cliente. Logs da tentativa anterior a essa correção podem não conter os streams dos jobs, mas A.log/B.log e logs remotos devem ser preservados. A correção é somente no diagnóstico; não resolve por si só falhas de WinRM, assinatura, runner ou gate.
