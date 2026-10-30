@@ -1,4 +1,5 @@
 # Worker Facilitador - execução SYSTEM, parâmetros estruturados e saída sem duplicação.
+# Revisao: live-log-sharing-r2
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ComputerName,
@@ -159,6 +160,7 @@ try {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $result = $null
     $Offsets=@{}
+    $BusyWarnings=@{}
     do {
         Start-Sleep -Seconds 2
         $result = Invoke-Command -Session $session -ScriptBlock {
@@ -166,24 +168,60 @@ try {
             $t = Get-ScheduledTask -TaskName $task -ErrorAction Stop
             $i = Get-ScheduledTaskInfo -TaskName $task -ErrorAction Stop
             $channels=@{}
+            $busy=@()
+            $taskDone=$i.LastRunTime.Year -gt 2000 -and $t.State -notin @('Running','Queued') -and $i.LastTaskResult -ne 267009
+            function Read-SharedLog {
+                param([Parameter(Mandatory)][string]$Path)
+                $Stream=$null;$Reader=$null
+                try {
+                    $Sharing=[IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+                    $Stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,$Sharing)
+                    $Reader=[IO.StreamReader]::new($Stream,[Text.Encoding]::UTF8,$true)
+                    return [pscustomobject]@{State='read';Text=$Reader.ReadToEnd()}
+                } catch {
+                    $Cause=$_.Exception
+                    while ($Cause.InnerException) {$Cause=$Cause.InnerException}
+                    $NativeCode=$Cause.HResult -band 0xffff
+                    if ($Cause -is [IO.IOException] -and $NativeCode -in @(32,33)) {
+                        return [pscustomobject]@{State='busy';Text=$null}
+                    }
+                    if ($Cause -is [IO.FileNotFoundException] -or $Cause -is [IO.DirectoryNotFoundException]) {
+                        return [pscustomobject]@{State='missing';Text=$null}
+                    }
+                    throw
+                } finally {
+                    if ($Reader) {$Reader.Dispose()} elseif ($Stream) {$Stream.Dispose()}
+                }
+            }
             # Preferir o snapshot privado do script; stdout e stderr permanecem preservados.
             $script=Join-Path $dir 'script.log'
             if (-not (Test-Path -LiteralPath $script) -or (Get-Item -LiteralPath $script).Length -eq 0) {$script=Join-Path $dir 'legacy-script.log'}
-            $names=if ((Test-Path -LiteralPath $script) -and (Get-Item -LiteralPath $script).Length -gt 0) {@('gate.log',(Split-Path $script -Leaf),'stderr.log','guard-process.log')} else {@('gate.log','processo.log','stderr.log','guard-process.log')}
+            $names=if ((Test-Path -LiteralPath $script) -and (Get-Item -LiteralPath $script).Length -gt 0) {@('gate.log',(Split-Path $script -Leaf),'stderr.log')} else {@('gate.log','processo.log','stderr.log')}
+            # A redirecao do cmd pode manter este arquivo exclusivamente aberto ate o fim.
+            if ($taskDone) {$names+='guard-process.log'}
             foreach ($name in $names) {
                 $path=Join-Path $dir $name
-                if (Test-Path -LiteralPath $path) {$channels[$name]=[IO.File]::ReadAllText($path)}
+                $read=Read-SharedLog -Path $path
+                if ($read.State -eq 'read') {$channels[$name]=$read.Text}
+                elseif ($read.State -eq 'busy') {$busy+=$name}
             }
-            [pscustomobject]@{State=[string]$t.State; Code=[long]$i.LastTaskResult; LastRun=$i.LastRunTime; Channels=$channels}
+            [pscustomobject]@{State=[string]$t.State; Code=[long]$i.LastTaskResult; LastRun=$i.LastRunTime; Channels=$channels; Busy=$busy}
         } -ArgumentList $taskName,$remoteDir
         $done=$result.LastRun.Year -gt 2000 -and $result.State -notin @('Running','Queued') -and $result.Code -ne 267009
+        $busy=@($result.Busy | Where-Object {$_})
+        foreach ($name in $busy) {
+            if (-not $BusyWarnings.ContainsKey($name)) {
+                Write-Log "[ACOMPANHAMENTO] Log temporariamente ocupado: $name; nova leitura sera tentada sem encerrar a tarefa."
+                $BusyWarnings[$name]=$true
+            }
+        }
         foreach ($entry in $result.Channels.GetEnumerator()) {
             $name=[string]$entry.Key; $text=[string]$entry.Value
             $read=Get-CompleteLogLines -Text $text -Offset ([int]$Offsets[$name]) -Final:$done
             foreach ($line in $read.Lines) {if ($line.Trim()) {Mostrar-LinhaAnalista $line}}
             $Offsets[$name]=$read.Offset
         }
-        if ($result.LastRun.Year -gt 2000 -and $result.State -notin @('Running','Queued') -and $result.Code -ne 267009) {
+        if ($done -and $busy.Count -eq 0) {
             $finalizado = $true
             break
         }
