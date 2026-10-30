@@ -8,6 +8,29 @@ param(
     [switch]$ConfirmarDestinoSemInstalacoes
 )
 $ErrorActionPreference='Stop'
+function Save-HmlDiagnostics {
+    param([Parameter(Mandatory)][object[]]$Jobs,[Parameter(Mandatory)][string]$Root)
+    $Report=@(foreach ($Job in $Jobs) {
+        $ReadErrors=@()
+        $Output=@(Receive-Job -Job $Job -Keep -ErrorAction SilentlyContinue -ErrorVariable ReadErrors)
+        $Errors=@($Job.Error)+@($ReadErrors)+@(foreach ($Child in $Job.ChildJobs) {$Child.Error})
+        $Reason=if ($Job.JobStateInfo.Reason) {$Job.JobStateInfo.Reason.Message} else {''}
+        $StreamFile=Join-Path $Root ($Job.Id.ToString()+'-job.txt')
+        $Output | Out-String -Width 240 | Set-Content -LiteralPath $StreamFile -Encoding UTF8
+        if ($Reason) {Add-Content -LiteralPath $StreamFile -Value ('Reason: '+$Reason) -Encoding UTF8}
+        foreach ($ErrorRecord in $Errors) {
+            if ($ErrorRecord) {Add-Content -LiteralPath $StreamFile -Value ($ErrorRecord | Out-String -Width 240) -Encoding UTF8}
+        }
+        [pscustomobject]@{
+            Id=$Job.Id;Name=$Job.Name;State=[string]$Job.State;Reason=$Reason
+            Errors=@($Errors | Where-Object {$null -ne $_} | ForEach-Object { [string]$_ })
+            ErrorCount=@($Errors | Where-Object {$null -ne $_}).Count
+            StreamFile=$StreamFile
+        }
+    })
+    ConvertTo-Json -InputObject $Report -Depth 5 | Set-Content -LiteralPath (Join-Path $Root 'job-status.json') -Encoding UTF8
+    return $Report
+}
 if (-not $ConfirmarDestinoSemInstalacoes) {throw 'Confira ausencia de instalacoes/tarefas anteriores no cliente de homologacao.'}
 if ((Get-AuthenticodeSignature -LiteralPath $PSCommandPath).Status -ne 'Valid') {throw 'Assine a copia deste teste antes de executar.'}
 if ((Get-AuthenticodeSignature -LiteralPath $Worker).Status -ne 'Valid') {throw 'Worker institucional sem assinatura valida.'}
@@ -19,23 +42,32 @@ foreach ($Store in @('Cert:\CurrentUser\My','Cert:\LocalMachine\My')) {
 if (-not $Certificate) {throw 'Certificado com chave privada nao encontrado nesta estacao.'}
 $Root=Join-Path $env:ProgramData ('Magbel\HomologacaoFila\'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $Root -Force | Out-Null
+Write-Host "Logs do aceite: $Root"
 $Jobs=@()
 foreach ($Name in @('A','B')) {
     $Script=Join-Path $Root ('Teste-Fila-'+$Name+'.ps1')
     Copy-Item -LiteralPath (Join-Path $Repo ('facilitador-agent\homologacao\Teste-Fila-'+$Name+'.ps1')) -Destination $Script
     if ((Set-AuthenticodeSignature -FilePath $Script -Certificate $Certificate -HashAlgorithm SHA256).Status -ne 'Valid') {throw 'Assinatura da acao inofensiva nao validada.'}
     $Log=Join-Path $Root ($Name+'.log')
-    $Jobs+=Start-Job -ArgumentList $Worker,$ComputerName,$Script,$Log,$Name -ScriptBlock {
+    $Jobs+=Start-Job -Name ('Magbel-Aceite-'+$Name+'-'+[IO.Path]::GetFileName($Root)) -ArgumentList $Worker,$ComputerName,$Script,$Log,$Name -ScriptBlock {
         param($Worker,$Target,$Script,$Log,$Name)
         & $Worker -ComputerName $Target -FilePath $Script -LogFile $Log -Programa ('TESTE_FILA_'+$Name) -TimeoutSeconds 120
         if ($LASTEXITCODE -ne 0) {throw "Worker $Name sem sucesso confirmado."}
     }
 }
-$Limit=(Get-Date).AddSeconds(150)
-while (@($Jobs | Where-Object State -in @('Running','NotStarted')).Count -and (Get-Date) -lt $Limit) {Start-Sleep -Seconds 2}
-if (@($Jobs | Where-Object State -ne 'Completed').Count) {
-    Write-Host "Logs locais: $Root"
-    throw 'Teste sem confirmacao. Nenhuma tarefa/processo remoto foi encerrado; confira Get-Job e o cliente antes de repetir.'
+$Watch=[Diagnostics.Stopwatch]::StartNew();$NextNotice=0
+while (@($Jobs | Where-Object State -in @('Running','NotStarted')).Count -and $Watch.Elapsed.TotalSeconds -lt 150) {
+    if ($Watch.Elapsed.TotalSeconds -ge $NextNotice) {
+        Write-Host ('[ACEITE] '+(@($Jobs | ForEach-Object {$_.Name+': '+$_.State}) -join ' | '))
+        $NextNotice=$Watch.Elapsed.TotalSeconds+15
+    }
+    Start-Sleep -Seconds 2
+}
+$JobReport=@(Save-HmlDiagnostics -Jobs $Jobs -Root $Root)
+if (@($JobReport | Where-Object {$_.State -ne 'Completed' -or $_.ErrorCount -gt 0}).Count) {
+    $JobReport | Format-List Name,State,Reason,Errors,StreamFile | Out-Host
+    Write-Host "Relatorio persistido: $Root\job-status.json"
+    throw 'Teste sem confirmacao. Erros dos jobs foram preservados. Nenhuma tarefa/processo remoto foi encerrado; confira logs e o cliente antes de repetir.'
 }
 $Jobs | Receive-Job -ErrorAction Stop | Out-Host
 $Ranges=@{}
