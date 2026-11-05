@@ -47,9 +47,12 @@ fora dele. O atualizador só aceita 2.0.9 -> 2.0.10, mantém backup protegido,
 configuração e identidade, compila o Python e inicia a tarefa existente.
 Confirme heartbeat 2.0.10, conta e prontidão antes de ativar o APP no painel.
 
-Não atualize o publicador permanente nem a frota inteira com os preparadores
-209: esse fluxo continua na entrega anterior. A homologação global e a atualização
-em massa 2.0.10 aguardam aceite do canário; não troque ainda AGENT_APPROVED_VERSION.
+O preparador `preparar-consultas-210.ps1` gera e assina o pacote permanente
+2.0.10 preservando a inscrição. Atualize o checkout **localmente** antes; o
+preparador não executa Git por SMB. O painel atualizado oferece 2.0.9 -> 2.0.10,
+um executor por vez. Use o preparador 210; os preparadores 208/209 anteriores são
+entregas históricas e seus hashes não aceitam o código novo. A ampliação da frota
+e AGENT_APPROVED_VERSION=2.0.10 aguardam aceite do canário.
 
 ## Aceite pelo painel
 

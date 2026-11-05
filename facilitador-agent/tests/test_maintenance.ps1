@@ -22,7 +22,7 @@ try {
     if ($Capture.Arguments.Count -ne 6) {throw 'UnexpectedTransport'}
     $Current=[Text.Encoding]::UTF8.GetString($Capture.Arguments[3])
     # Código sintético anterior para provar troca/rollback; o pin real é conferido separadamente.
-    $Old=$Current.Replace('VERSION = "2.0.9"','VERSION = "2.0.8"')
+    $Old=$Current.Replace('VERSION = "2.0.10"','VERSION = "2.0.9"')
     # Diagnostico apenas da fixture sintetica; o helper publicado continua redigindo erros.
     $DiagnosticBlock=$Capture.Block.ToString().Replace("ErrorCode='remote_step_failed'","ErrorCode='remote_step_failed'; FixtureError=`$_.Exception.Message; FixtureLine=`$_.InvocationInfo.ScriptLineNumber")
     $env:MAGBEL_MAINT_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($DiagnosticBlock))
@@ -82,4 +82,5 @@ Write-Host 'PS5.1: apply/rollback reais, identidade/tarefa preservadas, repetiç
     Get-ChildItem Env:MAGBEL_MAINT_* | Remove-Item
     Remove-Item $Temp -Recurse -Force
 }
+
 
