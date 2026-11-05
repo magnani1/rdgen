@@ -13,8 +13,8 @@ from urllib.parse import urlsplit
 
 from fleet_manager import FleetError, Portal, targets
 
-VERSION = '2.0.8'
-SOURCE_HASH = 'e981aedb4db1a6cbfbcfc1e0c64f049d24d9591142ea4fae08f80be947d884ab'
+VERSION = '2.0.9'
+SOURCE_HASH = '4c3632ea937cd70490e883fd8abcd1e672b5d4d1aebbaf9406765e02b854167d'
 
 
 def source_hash(path):
@@ -143,7 +143,7 @@ def main(argv=None):
     hosts = [host for host, _ in targets(args.hosts)]
     package = args.package.resolve()
     if source_hash(package/'facilitador-agent.py') != SOURCE_HASH:
-        raise FleetError('Pacote de código fora da referência 2.0.8.')
+        raise FleetError('Pacote de código fora da referência 2.0.9.')
     helper = package/'manutencao-agente.ps1'
     # Validação da confiança Authenticode no próprio Windows; sem bypass de política.
     encoded_path = base64.b64encode(str(helper).encode('utf-8')).decode('ascii')
@@ -170,3 +170,4 @@ if __name__ == '__main__':
         raise SystemExit(1)
     except KeyboardInterrupt:
         print('Conector encerrado; operações interrompidas exigem conferência antes de repetir.')
+

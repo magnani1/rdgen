@@ -23,7 +23,7 @@ class Watcher:
 
 
 class RemoteMonitorTests(unittest.TestCase):
-    def run_remote(self, process, clock, logs=None):
+    def run_remote(self, process, clock, logs=None, parametros=None):
         with tempfile.TemporaryDirectory() as root, \
              patch.object(agent, 'LOG_DIR', root), \
              patch.object(agent, 'REMOTE_TIMEOUT_SECONDS', 7200), \
@@ -33,7 +33,10 @@ class RemoteMonitorTests(unittest.TestCase):
              patch.object(agent.time, 'sleep'), \
              patch.object(agent.time, 'monotonic', side_effect=clock), \
              patch.object(agent, '_ler_novo_e_enviar', side_effect=logs or [(0, '')]*5):
-            result = agent.executar_remota('teste', {'alvos':['pc.tjpb.jus.br']}, 'KODAK.ps1')
+            payload = {'alvos':['pc.tjpb.jus.br']}
+            if parametros is not None:
+                payload['parametros'] = parametros
+            result = agent.executar_remota('teste', payload, 'KODAK.ps1')
             return result, popen.call_args.args[0], [c.args[1] for c in send.call_args_list]
 
     def test_runs_past_ten_minutes_and_success_text_does_not_finish_watcher(self):
@@ -57,6 +60,30 @@ class RemoteMonitorTests(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertTrue(result['uncertain'])
 
+    def test_scanner_uses_private_worker_argument_without_global_parameter_write(self):
+        with patch.object(agent.subprocess, 'run') as legacy:
+            result, args, _ = self.run_remote(Watcher(), [0], parametros={'NomeScanner':'EPSON-TOMBO.TJPB.JUS.BR'})
+        self.assertTrue(result['ok'])
+        self.assertEqual(args[-2:], ['-NomeScanner','EPSON-TOMBO.TJPB.JUS.BR'])
+        legacy.assert_not_called()
+
+    def test_empty_scanner_preserves_install_only_command(self):
+        with patch.object(agent.subprocess, 'run') as legacy:
+            result, args, _ = self.run_remote(Watcher(), [0], parametros={'NomeScanner':''})
+        self.assertTrue(result['ok'])
+        self.assertNotIn('-NomeScanner',args)
+        legacy.assert_not_called()
+
+    def test_invalid_scanner_never_starts_worker_or_legacy_write(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(agent, 'LOG_DIR',root), \
+             patch.object(agent.subprocess,'Popen') as process, patch.object(agent.subprocess,'run') as legacy:
+            for name in ('bad;whoami','bad name','http://scanner','a..b',None, ['scanner']):
+                with self.subTest(name=name):
+                    result=agent.executar_remota('teste',{'alvos':['pc.test'],'parametros':{'NomeScanner':name}},'DS-790WN.ps1')
+                    self.assertFalse(result['ok'])
+            process.assert_not_called();legacy.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
+
