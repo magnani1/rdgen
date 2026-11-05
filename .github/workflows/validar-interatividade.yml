@@ -1,0 +1,21 @@
+name: Validar analise estatica de interatividade
+on:
+  pull_request:
+    paths: ['tools/interatividade/**', '.github/workflows/validar-interatividade.yml']
+  push:
+    branches: [master]
+    paths: ['tools/interatividade/**', '.github/workflows/validar-interatividade.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ast:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - shell: powershell
+        run: ./tools/interatividade/tests/test_analysis.ps1
+      - shell: pwsh
+        run: ./tools/interatividade/tests/test_analysis.ps1
