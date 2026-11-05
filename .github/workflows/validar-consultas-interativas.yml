@@ -1,0 +1,23 @@
+name: Validar consultas interativas somente leitura
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  consultas:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r facilitador-agent/requirements.txt
+      - run: python -m unittest discover -s facilitador-agent/tests -p test_interactive_inspect.py -v
+      - shell: powershell
+        run: ./facilitador-agent/tests/test_interactive_inspect.ps1
+      - shell: pwsh
+        run: ./facilitador-agent/tests/test_interactive_inspect.ps1
