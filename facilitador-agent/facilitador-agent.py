@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.9"
+VERSION = "2.0.10"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -66,6 +66,117 @@ TIMEOUT_EXECUCAO = 600
 # aguarda ainda 60s para o worker devolver o resultado/diagnóstico final.
 REMOTE_TIMEOUT_SECONDS = max(30, min(14400, int(os.environ.get('AGENT_REMOTE_TIMEOUT_SECONDS', '7200'))))
 
+
+
+INTERACTIVE_QUERY_SCRIPT = r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+function Get-MagbelQueryIdentity { [Security.Principal.WindowsIdentity]::GetCurrent().Name }
+function Invoke-MagbelInteractiveReadOnly($Request) {
+    if ((Get-MagbelQueryIdentity) -ine $Request.execution_account) { throw 'execution_identity_mismatch' }
+    $Identity = Get-MagbelQueryIdentity
+    $Data = $null
+    if ($Request.profile -eq 'dhcp') {
+        Import-Module DhcpServer -ErrorAction Stop
+        $ScopeId = [ipaddress]$Request.scope
+        $Scope = Get-DhcpServerv4Scope -ComputerName $Request.server -ScopeId $ScopeId -ErrorAction Stop
+        if (-not $Scope) { throw 'scope_not_confirmed' }
+        # Sem -ErrorAction SilentlyContinue: permissão/falha não vira ausência de reserva.
+        $All = @(Get-DhcpServerv4Reservation -ComputerName $Request.server -ScopeId $ScopeId -ErrorAction Stop | Select-Object -First 4097)
+        if ($All.Count -gt 4096) { throw 'query_limit_exceeded' }
+        $Rows = @()
+        foreach ($Reservation in $All) {
+            $Client = ([string]$Reservation.ClientId).Replace('-', '').Replace(':', '').ToUpperInvariant()
+            # Alguns clientes DHCP incluem o tipo Ethernet antes dos seis octetos.
+            if ($Client.Length -eq 14 -and $Client.StartsWith('01')) { $Client = $Client.Substring(2) }
+            if ($Request.macs -contains $Client -or $Request.ips -contains [string]$Reservation.IPAddress) {
+                $Rows += @{ip=[string]$Reservation.IPAddress; client_id=$Client; name=[string]$Reservation.Name; description=[string]$Reservation.Description}
+            }
+        }
+        if ($Rows.Count -gt 100) { throw 'query_limit_exceeded' }
+        $Data = @{scope=@{id=[string]$Scope.ScopeId; mask=[string]$Scope.SubnetMask; start=[string]$Scope.StartRange; end=[string]$Scope.EndRange; state=[string]$Scope.State}; reservations=@($Rows)}
+    } elseif ($Request.profile -eq 'iot') {
+        Import-Module ActiveDirectory -ErrorAction Stop
+        $Groups = @()
+        foreach ($Name in $Request.groups) {
+            # Pesquisa exata por sAMAccountName normalizado; nunca aceita filtro do painel.
+            $Found = @(Get-ADGroup -LDAPFilter "(sAMAccountName=$Name)" -Server $Request.server -ErrorAction Stop)
+            if ($Found.Count -gt 1) { throw 'ambiguous_directory_object' }
+            $Groups += @{name=$Name; exists=($Found.Count -eq 1); dn=if ($Found.Count) {[string]$Found[0].DistinguishedName} else {''}}
+        }
+        $Devices = @()
+        foreach ($Mac in $Request.macs) {
+            $Found = @(Get-ADUser -LDAPFilter "(sAMAccountName=$Mac)" -SearchBase $Request.base_dn -SearchScope Subtree -Server $Request.server -Properties Enabled,Description,MemberOf -ErrorAction Stop)
+            if ($Found.Count -gt 1) { throw 'ambiguous_directory_object' }
+            $Memberships = @()
+            if ($Found.Count) {
+                foreach ($Group in $Groups) {
+                    if ($Group.exists -and @($Found[0].MemberOf) -contains $Group.dn) { $Memberships += $Group.name }
+                }
+            }
+            $Devices += @{mac=$Mac; exists=($Found.Count -eq 1); enabled=if ($Found.Count) {[bool]$Found[0].Enabled} else {$null}; description=if ($Found.Count) {[string]$Found[0].Description} else {''}; groups=@($Memberships)}
+        }
+        $Data = @{devices=@($Devices); groups=@($Groups | ForEach-Object { @{name=$_.name; exists=$_.exists} })}
+    } else { throw 'unsupported_profile' }
+    return @{ok=$true; profile=$Request.profile; checked_at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); execution_account=$Identity; data=$Data}
+}
+'''
+
+def consultar_estado_interativo(payload):
+    """Consulta fixa e somente leitura usando a identidade do processo do agente."""
+    request = payload.get('query')
+    if (payload.get('client_id') != CLIENT_ID or type(payload.get('expires')) is not int
+            or not int(time.time()) < payload['expires'] <= int(time.time()) + 180
+            or not isinstance(request, dict)):
+        return {'ok': False, 'code': 'query_invalid_or_expired'}
+    required = {'profile', 'server', 'execution_account', 'macs'}
+    profile = request.get('profile')
+    allowed = required | ({'scope', 'ips'} if profile == 'dhcp' else {'base_dn', 'groups'})
+    if profile not in ('dhcp', 'iot') or set(request) != allowed:
+        return {'ok': False, 'code': 'invalid_query'}
+    if (not isinstance(request.get('server'), str)
+            or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+', request['server'])
+            or not isinstance(request.get('execution_account'), str)
+            or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}\\[A-Za-z0-9_.-]{1,64}', request['execution_account'])):
+        return {'ok': False, 'code': 'invalid_query'}
+    macs = request.get('macs')
+    if not isinstance(macs, list) or len(macs) > 100 or any(not isinstance(m, str) or not re.fullmatch(r'[0-9A-F]{12}', m) for m in macs):
+        return {'ok': False, 'code': 'invalid_query'}
+    if profile == 'dhcp':
+        import ipaddress
+        try:
+            ipaddress.IPv4Address(request['scope'])
+            if not isinstance(request['ips'], list) or len(request['ips']) > 2:
+                raise ValueError()
+            for ip in request['ips']: ipaddress.IPv4Address(ip)
+        except (ValueError, TypeError):
+            return {'ok': False, 'code': 'invalid_query'}
+    else:
+        if (not macs or not isinstance(request['base_dn'], str) or len(request['base_dn']) > 512
+                or not re.fullmatch(r'(?:OU=[^,=+<>;"\\\r\n]{1,100},)+(?:DC=[A-Za-z0-9-]{1,63},)*DC=[A-Za-z0-9-]{1,63}', request['base_dn'])
+                or not isinstance(request['groups'], list) or len(request['groups']) > 32
+                or any(not isinstance(g, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', g) for g in request['groups'])):
+            return {'ok': False, 'code': 'invalid_query'}
+    if platform.system() != 'Windows':
+        return {'ok': False, 'code': 'windows_required'}
+    # Dados vão como JSON base64: não concatenar valores em expressões PowerShell.
+    encoded = base64.b64encode(json.dumps(request, ensure_ascii=False).encode('utf-8')).decode('ascii')
+    script = INTERACTIVE_QUERY_SCRIPT + "\ntry { $Request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded + "')) | ConvertFrom-Json; Invoke-MagbelInteractiveReadOnly $Request | ConvertTo-Json -Depth 8 -Compress } catch { $Code='directory_query_failed'; if ($_.Exception.Message -in @('execution_identity_mismatch','scope_not_confirmed','query_limit_exceeded','ambiguous_directory_object')) {$Code=$_.Exception.Message}; @{ok=$false;code=$Code} | ConvertTo-Json -Compress }"
+    command = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+    try:
+        executable = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+        result = subprocess.run([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', command],
+                                capture_output=True, encoding='utf-8', errors='replace', timeout=60)
+        if result.returncode or len(result.stdout) > 65536:
+            return {'ok': False, 'code': 'directory_query_failed'}
+        data = json.loads(result.stdout.lstrip('\ufeff').strip())
+        if not isinstance(data, dict) or type(data.get('ok')) is not bool:
+            return {'ok': False, 'code': 'directory_query_failed'}
+        return data
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'code': 'query_timeout'}
+    except (OSError, ValueError):
+        return {'ok': False, 'code': 'directory_query_failed'}
 
 def consultar_sessoes_windows(host):
     """Consulta WTS no destino por Kerberos; não conecta nem encerra sessões."""
@@ -842,6 +953,9 @@ def processar_job(job):
         elif tipo == "ad_buscar":
             resultado = buscar_ad(payload.get("termo", ""), payload.get("tipo", "usuario"))
             status = "concluido"
+        elif tipo == "interactive_inspect":
+            resultado = consultar_estado_interativo(payload)
+            status = "concluido" if resultado.get("ok") else "erro"
         elif tipo == "windows_sessions":
             resultado = consultar_sessoes_windows(payload.get('hostname',''))
             status = "concluido" if resultado.get('ok') else "erro"
