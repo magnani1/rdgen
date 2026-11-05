@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+# Revisao: runner-owned-process-r3
 <# Gate local por computador. A tarefa continua protegida mesmo se o watcher perder contato.
 Nao encerra msiexec, setups ou tarefas anteriores. Falha de acompanhamento nao libera o marcador.
 #>
@@ -12,6 +13,30 @@ $Marker=Join-Path $Root 'active.json'
 $Lock=$null; $Process=$null; $Confirmed=$false; $OwnedMarker=$false; $Code=1; $script:LegacyOffset=0
 function Write-Gate([string]$Text) {
     Add-Content -LiteralPath (Join-Path $Dir 'gate.log') -Value ('[{0}] {1}' -f (Get-Date -Format HH:mm:ss),$Text) -Encoding UTF8
+}
+function Start-OwnedRunnerProcess {
+    param([string]$Engine,[string]$Arguments,[string]$Directory)
+    # Process.Start conserva o handle desde a criacao. Nao obter o processo de
+    # novo por PID depois de terminar: o codigo de saida pode ficar indisponivel.
+    # O cmd so redireciona os arquivos privados e devolve o codigo do comando.
+    # Nao usamos pipes do PowerShell nem callbacks que dependam de runspace.
+    $Output=Join-Path $Directory 'processo.log'
+    $ErrorOutput=Join-Path $Directory 'stderr.log'
+    foreach ($Path in @($Engine,$Output,$ErrorOutput)) {
+        if ($Path -match '["\r\n%!]') {throw 'Caminho do runner nao suportado para redirecionamento seguro.'}
+    }
+    $Info=[Diagnostics.ProcessStartInfo]::new()
+    $Info.FileName=$env:ComSpec
+    $Info.Arguments='/d /s /c '+('""{0}" {1} 1>"{2}" 2>"{3}""' -f $Engine,$Arguments,$Output,$ErrorOutput)
+    $Info.WorkingDirectory=$Directory
+    $Info.UseShellExecute=$false
+    $Info.CreateNoWindow=$true
+    $Owned=[Diagnostics.Process]::new()
+    $Owned.StartInfo=$Info
+    try {
+        if (-not $Owned.Start()) {throw 'Runner nao iniciou.'}
+        return $Owned
+    } catch {$Owned.Dispose();throw}
 }
 function Test-InstallerBusy {
     # Nao confundir o servico msiexec /V ocioso com um cliente de instalacao.
@@ -93,8 +118,7 @@ try {
     $env:FACILITADOR_WORK_DIR=$Dir
     Write-Gate 'Exclusao adquirida. Iniciando somente a tarefa atual.'
     $Arguments='-NoProfile -NonInteractive -File "{0}" -Config "{1}"' -f (Join-Path $Dir 'Executar-TarefaLocal.ps1'),(Join-Path $Dir 'params.json')
-    $Process=Start-Process -FilePath ([string]$Settings.Engine) -ArgumentList $Arguments -PassThru -NoNewWindow `
-        -RedirectStandardOutput (Join-Path $Dir 'processo.log') -RedirectStandardError (Join-Path $Dir 'stderr.log')
+    $Process=Start-OwnedRunnerProcess -Engine ([string]$Settings.Engine) -Arguments $Arguments -Directory $Dir
     $Tracked=@{}
     $Created=Get-CimInstance Win32_Process -Filter ("ProcessId="+$Process.Id) -ErrorAction Stop
     if ($Created) {$Tracked[$Process.Id]=[datetime]$Created.CreationDate}
@@ -120,6 +144,9 @@ try {
     if ($null -eq $Process.ExitCode) {throw 'Codigo final do runner nao confirmado.'}
     $Code=[int]$Process.ExitCode
     Copy-OwnedLegacyLog
+    # Evidencia numerica do encerramento, independente de mensagens SUCESSO no log.
+    @{task=$Settings.Task;exit_code=$Code;finished=(Get-Date).ToUniversalTime().ToString('o')} |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Dir 'runner-result.json') -Encoding UTF8
     $Confirmed=$true
     Write-Gate "Tarefa e filhos observados encerrados. Codigo: $Code."
 } catch {
@@ -127,5 +154,6 @@ try {
 } finally {
     if ($OwnedMarker -and $Confirmed) {Remove-Item -LiteralPath $Marker -Force}
     if ($Lock) {$Lock.Dispose()}
+    if ($Process) {$Process.Dispose()}
 }
 exit $Code

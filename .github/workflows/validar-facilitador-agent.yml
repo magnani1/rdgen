@@ -43,6 +43,10 @@ jobs:
       - shell: pwsh
         run: ./facilitador-agent/tests/test_worker_logs.ps1
       - shell: pwsh
+        run: ./facilitador-agent/tests/test_guard_exit.ps1
+      - shell: powershell
+        run: ./facilitador-agent/tests/test_guard_exit.ps1
+      - shell: pwsh
         run: ./facilitador-agent/tests/test_hml_diagnostics.ps1
   empacotar_assistente:
     needs: validar
@@ -68,5 +72,3 @@ jobs:
           name: Magbel-Facilitador-Setup-nao-assinado
           path: dist-assistant/Magbel-Facilitador-Setup.exe
           retention-days: 14
-
-
