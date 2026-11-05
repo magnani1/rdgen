@@ -46,7 +46,7 @@ function Get-PS1Analysis {
             if($Attribute.TypeName.Name -ieq 'Parameter') {
                 foreach($Named in $Attribute.NamedArguments) {
                     if($Named.ArgumentName -ieq 'Mandatory') {
-                        $Mandatory=$Named.ArgumentOmitted -or $Named.Argument.Extent.Text -ieq '$true'
+                        $Mandatory=$Named.ExpressionOmitted -or $Named.Argument.Extent.Text -ieq '$true'
                     }
                 }
             }
