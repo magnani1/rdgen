@@ -19,8 +19,13 @@ $Source = Join-Path $PSScriptRoot 'DS790WNInstall.cs'
 $Manifest = Join-Path $PSScriptRoot 'DS790WNInstall.manifest'
 New-Item -ItemType Directory -Path $Destination | Out-Null
 $Output = Join-Path (Resolve-Path -LiteralPath $Destination).ProviderPath 'DS790WNInstall.exe'
-& $Compiler /nologo /target:winexe /platform:anycpu /reference:System.Web.Extensions.dll "/win32manifest:$Manifest" "/out:$Output" $Source
-if ($LASTEXITCODE -ne 0) { throw 'Compilacao falhou.' }
+Push-Location -LiteralPath $PSScriptRoot
+try {
+    & $Compiler /nologo /target:winexe /platform:anycpu /reference:System.Web.Extensions.dll /win32manifest:DS790WNInstall.manifest "/out:$Output" DS790WNInstall.cs
+    $CompilerExit = $LASTEXITCODE
+}
+finally { Pop-Location }
+if ($CompilerExit -ne 0) { throw 'Compilacao falhou.' }
 $Signature = Set-AuthenticodeSignature -FilePath $Output -Certificate $Cert -HashAlgorithm SHA256 -TimestampServer 'http://timestamp.digicert.com'
 if ($Signature.Status -ne 'Valid') { throw "Assinatura nao validada: $($Signature.StatusMessage)" }
 Copy-Item -LiteralPath $Source,$Manifest -Destination $Destination

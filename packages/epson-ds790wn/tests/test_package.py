@@ -65,6 +65,15 @@ class PackageTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'different source'):
             builder.build(self.root, self.launcher)
 
+    def test_windows_checkout_line_endings_are_accepted(self):
+        for key, name in (('source', 'DS790WNInstall.cs'), ('manifest', 'DS790WNInstall.manifest')):
+            path = self.launcher / name
+            path.write_bytes(path.read_bytes().replace(b'\n', b'\r\n'))
+            self.proof[key + '_sha256'] = builder.sha(path)
+        self.write_proof()
+        archive, _ = builder.build(self.root, self.launcher)
+        self.assertTrue(archive.is_file())
+
     def test_profile_not_silently_replaced(self):
         (self.root / 'incoming/arquivo_perfil_digitalizacao.jxz').write_bytes(b'other')
         with self.assertRaisesRegex(ValueError, 'differs'):

@@ -46,7 +46,7 @@ def build(root, launcher, version=VERSION):
         if sha(launcher / name) != proof.get(key + '_sha256'):
             raise ValueError('Build evidence hash mismatch: ' + name)
     for name in ('DS790WNInstall.cs', 'DS790WNInstall.manifest'):
-        if (launcher / name).read_bytes() != Path(__file__).with_name(name).read_bytes():
+        if (launcher / name).read_text(encoding='utf-8-sig') != Path(__file__).with_name(name).read_text(encoding='utf-8-sig'):
             raise ValueError('Launcher was built from a different source: ' + name)
     scan = root / 'work/scan2'
     ocr = root / 'work/scanocr/OCRComp_v30006_21'
