@@ -21,3 +21,9 @@ jobs:
         run: ./facilitador-agent/tests/test_interactive_inspect.ps1
       - shell: pwsh
         run: ./facilitador-agent/tests/test_interactive_inspect.ps1
+
+      - run: python -m unittest discover -s facilitador-agent/tests -p test_interactive_listing.py -v
+      - shell: powershell
+        run: ./facilitador-agent/tests/test_interactive_listing.ps1
+      - shell: pwsh
+        run: ./facilitador-agent/tests/test_interactive_listing.ps1

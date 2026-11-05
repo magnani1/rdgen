@@ -4,17 +4,19 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z][a-zA-Z0-9.-]{0,252}$')][string]$ComputerName,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{32}$')][string]$OperationId,
     [Parameter(Mandatory)][ValidateSet('Apply','Rollback')][string]$Action,
-    [Parameter(Mandatory)][string]$AgentSourcePath
+    [Parameter(Mandatory)][string]$AgentSourcePath,
+    [ValidateSet('2.0.9','2.0.10')][string]$PreviousVersion='2.0.9'
 )
 $ErrorActionPreference = 'Stop'
 if ((Get-AuthenticodeSignature -LiteralPath $PSCommandPath).Status -ne 'Valid') { throw 'Assine esta cópia do helper na estação administrativa.' }
-$Expected = 'f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496'
-$PreviousHash = '4c3632ea937cd70490e883fd8abcd1e672b5d4d1aebbaf9406765e02b854167d'
+$Expected = '297eac5c2174f47d0dc213ef5aa80a4c21e12c3288923274352c5dc6e34dc479'
+$PreviousHashes = @{'2.0.9'='4c3632ea937cd70490e883fd8abcd1e672b5d4d1aebbaf9406765e02b854167d';'2.0.10'='f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496'}
+$PreviousHash = $PreviousHashes[$PreviousVersion]
 $Text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).ProviderPath).Replace("`r`n","`n").TrimEnd([char[]]"`r`n")+"`n"
 $Bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
 $Hasher = [Security.Cryptography.SHA256]::Create()
 try { $Hash = [BitConverter]::ToString($Hasher.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant() } finally { $Hasher.Dispose() }
-if ($Hash -ne $Expected) { throw 'Código fora da referência homologada 2.0.10.' }
+if ($Hash -ne $Expected) { throw 'Código fora da referência homologada 2.0.11.' }
 $HostId = $ComputerName.Split('.')[0].ToLowerInvariant()
 Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -ArgumentList $HostId,$OperationId,$Action,$Bytes,$Expected,$PreviousHash -ScriptBlock {
     param($Id,$OperationId,$Action,[byte[]]$Bytes,$Expected,$PreviousHash)
@@ -49,7 +51,7 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
     if ($Task.Principal.LogonType -ne 'Password') { throw 'Esta entrega preserva tarefas existentes com LogonType Password.' }
     if ($Action -eq 'Apply') {
         if (Test-Path -LiteralPath $Backup) { throw 'Operação já iniciada; não repetir a instalação.' }
-        if ((Canonical-Hash $Target) -ne $PreviousHash) { throw 'Esta entrega atualiza somente o código 2.0.9 homologado.' }
+        if ((Canonical-Hash $Target) -ne $PreviousHash) { throw 'Esta entrega atualiza somente o código de origem homologado selecionado.' }
         New-Item -ItemType Directory -Path $Backup | Out-Null
         $null = & icacls.exe $Backup /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
         if ($LASTEXITCODE -ne 0) { throw 'Não foi possível proteger o backup.' }
@@ -91,5 +93,6 @@ Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -Configurati
         [pscustomobject]@{Operation=$OperationId; Action=$Action; Agent=$Id; Ok=$false; RollbackAvailable=$BackupReady; ErrorCode='remote_step_failed'} | ConvertTo-Json -Compress
     }
 }
+
 
 
