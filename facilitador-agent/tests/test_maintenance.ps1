@@ -6,6 +6,10 @@ $Helper=Join-Path $Root 'manutencao-agente.ps1'
 $Agent=Join-Path $Root 'facilitador-agent.py'
 $Temp=Join-Path $env:TEMP ('maintenance-fixture-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $Temp | Out-Null
+# TEMP do runner pode conter RUNNER~1. Usar o mesmo caminho longo no config e
+# na verificacao de confinamento; nao relaxar o guard do runtime publicado.
+$Temp=(& python -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' $Temp).Trim()
+if ($LASTEXITCODE -ne 0) {throw 'FixturePathFailed'}
 $Capture=@{}
 function Get-AuthenticodeSignature {param($LiteralPath) [pscustomobject]@{Status='Valid'}}
 function Invoke-Command {

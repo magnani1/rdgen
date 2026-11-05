@@ -56,6 +56,10 @@ Na SEDE153729, o administrador executou o teste do commit
 Isso valida o launcher isolado; nao substitui o aceite da fila guardada, a
 publicacao assinada nem a reconciliacao do marcador anterior.
 
-No CI, a fixture de manutencao usava $State, nome tambem usado pelo bloco
-sob teste. Os mocks agora usam $FixtureState para nao compartilhar o nome.
-As verificacoes de apply/rollback, repeticao e preservacao nao foram relaxadas.
+No CI, a fixture de manutencao falhou com Runtime configurado invalido antes
+ de alterar tarefa/arquivos. TEMP usava o alias RUNNER~1, enquanto caminhos eram
+ normalizados no PowerShell 5.1. A fixture agora usa o caminho longo real do TEMP
+ e nomes de estado separados do bloco testado. Diagnosticos sao acrescentados
+ apenas ao bloco sintetico; o helper de producao e suas validacoes permanecem
+ inalterados. Verificacoes de apply/rollback, repeticao e preservacao nao foram
+ relaxadas.
