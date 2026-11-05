@@ -19,7 +19,9 @@ try {
     $Current=[Text.Encoding]::UTF8.GetString($Capture.Arguments[3])
     # Código sintético anterior para provar troca/rollback; o pin real é conferido separadamente.
     $Old=$Current.Replace('VERSION = "2.0.8"','VERSION = "2.0.7"')
-    $env:MAGBEL_MAINT_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Capture.Block.ToString()))
+    # Diagnostico apenas da fixture sintetica; o helper publicado continua redigindo erros.
+    $DiagnosticBlock=$Capture.Block.ToString().Replace("ErrorCode='remote_step_failed'","ErrorCode='remote_step_failed'; FixtureError=`$_.Exception.Message; FixtureLine=`$_.InvocationInfo.ScriptLineNumber")
+    $env:MAGBEL_MAINT_BLOCK=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($DiagnosticBlock))
     $env:MAGBEL_MAINT_NEW=[Convert]::ToBase64String($Capture.Arguments[3])
     $env:MAGBEL_MAINT_OLD=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Old))
     $env:MAGBEL_MAINT_HASH=$Capture.Arguments[4]
@@ -55,7 +57,7 @@ $BeforeConfig=(Get-FileHash $Config).Hash
 $BeforeIdentity=(Get-FileHash $Identity).Hash
 $Operation='a'*32
 $Result=(& $Block $Id $Operation Apply $Bytes $env:MAGBEL_MAINT_HASH $env:MAGBEL_MAINT_PREVIOUS) | ConvertFrom-Json
-if (-not $Result.Ok -or $FixtureState.Stops -ne 1 -or $FixtureState.Starts -ne 1) {throw 'ApplyFailed'}
+if (-not $Result.Ok -or $FixtureState.Stops -ne 1 -or $FixtureState.Starts -ne 1) {throw ('ApplyFailed: '+(@{Result=$Result;State=$FixtureState} | ConvertTo-Json -Depth 5 -Compress))}
 if ((Get-FileHash $Target).Hash.ToLowerInvariant() -ne $env:MAGBEL_MAINT_HASH) {throw 'NewCodeMismatch'}
 $Repeated=(& $Block $Id $Operation Apply $Bytes $env:MAGBEL_MAINT_HASH $env:MAGBEL_MAINT_PREVIOUS) | ConvertFrom-Json
 if ($Repeated.Ok -or $Repeated.RollbackAvailable -or $FixtureState.Starts -ne 1) {throw 'RepeatedUpdateChangedState'}
