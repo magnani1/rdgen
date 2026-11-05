@@ -1,0 +1,37 @@
+name: Validar launcher Epson DS-790WN
+on:
+  pull_request:
+    paths: ['packages/epson-ds790wn/**', '.github/workflows/validar-epson.yml']
+  push:
+    branches: [master]
+    paths: ['packages/epson-ds790wn/**', '.github/workflows/validar-epson.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $PWD 'packages/epson-ds790wn'
+          $csc=Join-Path $env:windir 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+          $exe=Join-Path $env:RUNNER_TEMP 'DS790WNInstall.exe'
+          & $csc /nologo /target:winexe /platform:anycpu /reference:System.Web.Extensions.dll "/win32manifest:$root/DS790WNInstall.manifest" "/out:$exe" "$root/DS790WNInstall.cs"
+          if($LASTEXITCODE -ne 0){throw 'Launcher compilation failed'}
+          $test=Join-Path $env:RUNNER_TEMP 'TestPlan.exe'
+          & $csc /nologo /target:exe /reference:System.Web.Extensions.dll "/out:$test" "$root/tests/TestPlan.cs"
+          if($LASTEXITCODE -ne 0){throw 'Test compilation failed'}
+          & $test $exe
+          if($LASTEXITCODE -ne 0){throw 'Launcher tests failed'}
+          $tokens=$null;$errors=$null
+          [Management.Automation.Language.Parser]::ParseFile("$root/build-launcher.ps1",[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){throw ($errors|Out-String)}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s packages/epson-ds790wn/tests -p 'test_*.py' -v
