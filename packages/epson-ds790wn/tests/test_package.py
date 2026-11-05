@@ -68,7 +68,7 @@ class PackageTest(unittest.TestCase):
     def test_windows_checkout_line_endings_are_accepted(self):
         for key, name in (('source', 'DS790WNInstall.cs'), ('manifest', 'DS790WNInstall.manifest')):
             path = self.launcher / name
-            path.write_bytes(path.read_bytes().replace(b'\n', b'\r\n'))
+            path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
             self.proof[key + '_sha256'] = builder.sha(path)
         self.write_proof()
         archive, _ = builder.build(self.root, self.launcher)
