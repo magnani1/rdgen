@@ -13,9 +13,9 @@ try {
     foreach ($Node in $Ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]},$true)) {
         if ($Allowed -notcontains $Node.GetCommandName()) { throw ('Comando não autorizado: '+$Node.GetCommandName()) }
     }
-    $Updater=Join-Path $PSScriptRoot '..\atualizar-consultas-210.ps1'
+    $Updater=Join-Path $PSScriptRoot '..\atualizar-listagens-211.ps1'
     [Management.Automation.Language.Parser]::ParseFile($Updater,[ref]$Tokens,[ref]$Errors) | Out-Null
-    if ($Errors.Count) { throw 'Sintaxe inválida no atualizador 2.0.10.' }
+    if ($Errors.Count) { throw 'Sintaxe inválida no atualizador 2.0.11.' }
     $PythonText=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\facilitador-agent.py')).Replace("`r`n","`n").TrimEnd([char[]]"`r`n")+"`n"
     $Hasher=[Security.Cryptography.SHA256]::Create()
     try { $Hash=[BitConverter]::ToString($Hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($PythonText))).Replace('-','').ToLowerInvariant() } finally {$Hasher.Dispose()}
@@ -50,3 +50,4 @@ try {
     if (-not $Failed) { throw 'Identidade de execução divergente foi aceita.' }
     Write-Host 'Consulta DHCP/IoT: AST somente leitura, identidade, escopo, MAC e falhas preservadas: OK'
 } finally { Remove-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue }
+

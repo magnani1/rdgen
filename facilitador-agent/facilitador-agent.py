@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.10"
+VERSION = "2.0.11"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -129,45 +129,24 @@ def consultar_estado_interativo(payload):
             or not int(time.time()) < payload['expires'] <= int(time.time()) + 180
             or not isinstance(request, dict)):
         return {'ok': False, 'code': 'query_invalid_or_expired'}
-    required = {'profile', 'server', 'execution_account', 'macs'}
-    profile = request.get('profile')
-    allowed = required | ({'scope', 'ips'} if profile == 'dhcp' else {'base_dn', 'groups'})
-    if profile not in ('dhcp', 'iot') or set(request) != allowed:
+    if _validar_directory_request(request):
         return {'ok': False, 'code': 'invalid_query'}
-    if (not isinstance(request.get('server'), str)
-            or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+', request['server'])
-            or not isinstance(request.get('execution_account'), str)
-            or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}\\[A-Za-z0-9_.-]{1,64}', request['execution_account'])):
-        return {'ok': False, 'code': 'invalid_query'}
-    macs = request.get('macs')
-    if not isinstance(macs, list) or len(macs) > 100 or any(not isinstance(m, str) or not re.fullmatch(r'[0-9A-F]{12}', m) for m in macs):
-        return {'ok': False, 'code': 'invalid_query'}
-    if profile == 'dhcp':
-        import ipaddress
-        try:
-            ipaddress.IPv4Address(request['scope'])
-            if not isinstance(request['ips'], list) or len(request['ips']) > 2:
-                raise ValueError()
-            for ip in request['ips']: ipaddress.IPv4Address(ip)
-        except (ValueError, TypeError):
-            return {'ok': False, 'code': 'invalid_query'}
-    else:
-        if (not macs or not isinstance(request['base_dn'], str) or len(request['base_dn']) > 512
-                or not re.fullmatch(r'(?:OU=[^,=+<>;"\\\r\n]{1,100},)+(?:DC=[A-Za-z0-9-]{1,63},)*DC=[A-Za-z0-9-]{1,63}', request['base_dn'])
-                or not isinstance(request['groups'], list) or len(request['groups']) > 32
-                or any(not isinstance(g, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', g) for g in request['groups'])):
-            return {'ok': False, 'code': 'invalid_query'}
     if platform.system() != 'Windows':
         return {'ok': False, 'code': 'windows_required'}
+    return _run_directory_query(INTERACTIVE_QUERY_SCRIPT, request, 'Invoke-MagbelInteractiveReadOnly')
+
+
+def _run_directory_query(script_source, request, function_name, maximum=65536):
     # Dados vão como JSON base64: não concatenar valores em expressões PowerShell.
     encoded = base64.b64encode(json.dumps(request, ensure_ascii=False).encode('utf-8')).decode('ascii')
-    script = INTERACTIVE_QUERY_SCRIPT + "\ntry { $Request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())) | ConvertFrom-Json; Invoke-MagbelInteractiveReadOnly $Request | ConvertTo-Json -Depth 8 -Compress } catch { $Code='directory_query_failed'; if ($_.Exception.Message -in @('execution_identity_mismatch','scope_not_confirmed','query_limit_exceeded','ambiguous_directory_object')) {$Code=$_.Exception.Message}; @{ok=$false;code=$Code} | ConvertTo-Json -Compress }"
+    script = script_source + "\ntry { $Request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())) | ConvertFrom-Json; __MAGBEL_FUNCTION__ $Request | ConvertTo-Json -Depth 8 -Compress } catch { $Code='directory_query_failed'; if ($_.Exception.Message -in @('execution_identity_mismatch','scope_not_confirmed','query_limit_exceeded','ambiguous_directory_object')) {$Code=$_.Exception.Message}; @{ok=$false;code=$Code} | ConvertTo-Json -Compress }"
+    script = script.replace('__MAGBEL_FUNCTION__', function_name)
     command = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
     try:
         executable = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
         result = subprocess.run([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', command],
                                 input=encoded, capture_output=True, encoding='utf-8', errors='replace', timeout=60)
-        if result.returncode or len(result.stdout) > 65536:
+        if result.returncode or len(result.stdout) > maximum:
             return {'ok': False, 'code': 'directory_query_failed'}
         data = json.loads(result.stdout.lstrip('\ufeff').strip())
         if not isinstance(data, dict) or type(data.get('ok')) is not bool:
@@ -177,6 +156,147 @@ def consultar_estado_interativo(payload):
         return {'ok': False, 'code': 'query_timeout'}
     except (OSError, ValueError):
         return {'ok': False, 'code': 'directory_query_failed'}
+
+def _validar_directory_request(request):
+    required = {'profile', 'server', 'execution_account', 'macs'}
+    profile = request.get('profile')
+    allowed = required | ({'scope', 'ips'} if profile == 'dhcp' else {'base_dn', 'groups'})
+    if profile not in ('dhcp', 'iot') or set(request) != allowed:
+        return True
+    if (not isinstance(request.get('server'), str)
+            or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+', request['server'])
+            or not isinstance(request.get('execution_account'), str)
+            or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}\\[A-Za-z0-9_.-]{1,64}', request['execution_account'])):
+        return True
+    macs = request.get('macs')
+    if not isinstance(macs, list) or len(macs) > 100 or any(not isinstance(m, str) or not re.fullmatch(r'[0-9A-F]{12}', m) for m in macs):
+        return True
+    if profile == 'dhcp':
+        import ipaddress
+        try:
+            ipaddress.IPv4Address(request['scope'])
+            if not isinstance(request['ips'], list) or len(request['ips']) > 2:
+                raise ValueError()
+            for ip in request['ips']: ipaddress.IPv4Address(ip)
+        except (ValueError, TypeError):
+            return True
+    else:
+        if (not macs or not isinstance(request['base_dn'], str) or len(request['base_dn']) > 512
+                or not re.fullmatch(r'(?:OU=[^,=+<>;"\\\r\n]{1,100},)+(?:DC=[A-Za-z0-9-]{1,63},)*DC=[A-Za-z0-9-]{1,63}', request['base_dn'])
+                or not isinstance(request['groups'], list) or len(request['groups']) > 32
+                or any(not isinstance(g, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', g) for g in request['groups'])):
+            return True
+    return False
+
+INTERACTIVE_LIST_SCRIPT = r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+function Get-MagbelListIdentity { [Security.Principal.WindowsIdentity]::GetCurrent().Name }
+function Test-MagbelListMatch($Row, [string]$Term) {
+    if (-not $Term) { return $true }
+    foreach ($Value in @($Row.ip,$Row.client_id,$Row.name,$Row.mac,$Row.description)) {
+        if ($null -ne $Value -and ([string]$Value).IndexOf($Term,[StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+    }
+    $Compact=$Term.Replace(':','').Replace('-','')
+    return $Compact -match '^[0-9A-Fa-f]{2,12}$' -and (([string]$Row.mac).IndexOf($Compact,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or ([string]$Row.client_id).IndexOf($Compact,[StringComparison]::OrdinalIgnoreCase) -ge 0)
+}
+function Invoke-MagbelInteractiveList($Request) {
+    if ((Get-MagbelListIdentity) -ine $Request.execution_account) { throw 'execution_identity_mismatch' }
+    $Rows=@(); $Total=0
+    if ($Request.profile -eq 'dhcp') {
+        Import-Module DhcpServer -ErrorAction Stop
+        if ($Request.kind -eq 'scopes') {
+            $Selected=@($Request.scopes | Where-Object { -not $Request.term -or ([string]$_).IndexOf($Request.term,[StringComparison]::OrdinalIgnoreCase) -ge 0 } | Sort-Object)
+            $Total=$Selected.Count
+            foreach ($Id in @($Selected | Select-Object -Skip $Request.offset -First $Request.limit)) {
+                $Scope=Get-DhcpServerv4Scope -ComputerName $Request.server -ScopeId ([ipaddress]$Id) -ErrorAction Stop
+                if (-not $Scope) { throw 'scope_not_confirmed' }
+                $Rows+=@{id=[string]$Scope.ScopeId;name=[string]$Scope.Name;mask=[string]$Scope.SubnetMask;start=[string]$Scope.StartRange;end=[string]$Scope.EndRange;state=[string]$Scope.State}
+            }
+        } elseif ($Request.kind -eq 'reservations') {
+            $All=@(Get-DhcpServerv4Reservation -ComputerName $Request.server -ScopeId ([ipaddress]$Request.scope) -ErrorAction Stop | Select-Object -First 4097)
+            if ($All.Count -gt 4096) { throw 'query_limit_exceeded' }
+            foreach ($Reservation in $All) {
+                $Client=([string]$Reservation.ClientId).Replace('-','').Replace(':','').ToUpperInvariant()
+                if ($Client.Length -eq 14 -and $Client.StartsWith('01')) { $Client=$Client.Substring(2) }
+                $Row=@{ip=[string]$Reservation.IPAddress;client_id=$Client;name=[string]$Reservation.Name;description=[string]$Reservation.Description}
+                if (Test-MagbelListMatch $Row $Request.term) { $Rows+=$Row }
+            }
+            $Rows=@($Rows | Sort-Object -Property ip,client_id)
+            $Total=$Rows.Count
+            $Rows=@($Rows | Select-Object -Skip $Request.offset -First $Request.limit)
+        } else { throw 'unsupported_profile' }
+    } elseif ($Request.profile -eq 'iot') {
+        Import-Module ActiveDirectory -ErrorAction Stop
+        $Groups=@()
+        foreach ($Name in $Request.groups) {
+            $Found=@(Get-ADGroup -LDAPFilter "(sAMAccountName=$Name)" -Server $Request.server -ErrorAction Stop)
+            if ($Found.Count -gt 1) { throw 'ambiguous_directory_object' }
+            $Groups+=@{name=$Name;exists=($Found.Count -eq 1);dn=if ($Found.Count) {[string]$Found[0].DistinguishedName} else {''}}
+        }
+        if ($Request.kind -eq 'groups') {
+            foreach ($Group in $Groups) {
+                if (-not $Request.term -or $Group.name.IndexOf($Request.term,[StringComparison]::OrdinalIgnoreCase) -ge 0) { $Rows+=@{name=$Group.name;exists=$Group.exists} }
+            }
+        } elseif ($Request.kind -eq 'devices') {
+            $All=@(Get-ADUser -LDAPFilter '(&(objectCategory=person)(objectClass=user))' -SearchBase $Request.base_dn -SearchScope Subtree -Server $Request.server -ResultSetSize 2001 -ResultPageSize 200 -Properties Enabled,Description,MemberOf -ErrorAction Stop)
+            if ($All.Count -gt 2000) { throw 'query_limit_exceeded' }
+            foreach ($User in $All) {
+                $Mac=[string]$User.SamAccountName
+                if ($Mac -notmatch '^[0-9A-Fa-f]{12}$') { continue }
+                $Memberships=@()
+                foreach ($Group in $Groups) { if ($Group.exists -and @($User.MemberOf) -contains $Group.dn) { $Memberships+=$Group.name } }
+                if ($Request.group -and $Memberships -notcontains $Request.group) { continue }
+                $Row=@{mac=$Mac.ToUpperInvariant();enabled=[bool]$User.Enabled;description=[string]$User.Description;groups=@($Memberships)}
+                if (Test-MagbelListMatch $Row $Request.term) { $Rows+=$Row }
+            }
+        } else { throw 'unsupported_profile' }
+        $Rows=@($Rows | Sort-Object -Property mac,name)
+        $Total=$Rows.Count
+        $Rows=@($Rows | Select-Object -Skip $Request.offset -First $Request.limit)
+    } else { throw 'unsupported_profile' }
+    return @{ok=$true;profile=$Request.profile;kind=$Request.kind;checked_at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds();execution_account=(Get-MagbelListIdentity);offset=$Request.offset;limit=$Request.limit;total=$Total;has_more=($Request.offset+$Rows.Count -lt $Total);rows=@($Rows)}
+}
+'''
+
+def consultar_listagem_interativa(payload):
+    query = payload.get('query')
+    if (payload.get('client_id') != CLIENT_ID or type(payload.get('expires')) is not int
+            or not int(time.time()) < payload['expires'] <= int(time.time())+180 or not isinstance(query, dict)):
+        return {'ok':False, 'code':'query_invalid_or_expired'}
+    profile, kind = query.get('profile'), query.get('kind')
+    common = {'profile','kind','server','execution_account','term','offset','limit'}
+    expected = common | ({'scopes','scope'} if profile == 'dhcp' else {'base_dn','groups','group'})
+    if (profile not in ('dhcp','iot') or set(query) != expected
+            or kind not in ({'scopes','reservations'} if profile == 'dhcp' else {'devices','groups'})
+            or not isinstance(query.get('term'), str) or len(query['term']) > 80 or any(ord(c)<32 for c in query['term'])
+            or type(query.get('offset')) is not int or not 0 <= query['offset'] <= 4096
+            or type(query.get('limit')) is not int or not 1 <= query['limit'] <= 50):
+        return {'ok':False, 'code':'invalid_query'}
+    # Reutiliza o validador de transporte da consulta exata sem iniciar processo.
+    probe = dict(query)
+    for key in ('kind','term','offset','limit','scopes','group'): probe.pop(key, None)
+    probe['macs'] = ['020000000001']
+    if profile == 'dhcp':
+        import ipaddress
+        scopes = query.get('scopes')
+        if not isinstance(scopes, list) or not 1 <= len(scopes) <= 256: return {'ok':False,'code':'invalid_query'}
+        try:
+            for scope in scopes:
+                if not isinstance(scope,str): raise ValueError()
+                ipaddress.IPv4Address(scope)
+        except (ValueError,TypeError): return {'ok':False,'code':'invalid_query'}
+        if kind == 'reservations' and query.get('scope') not in scopes: return {'ok':False,'code':'invalid_query'}
+        probe['scope'] = scopes[0] if kind == 'scopes' else query['scope']
+        probe['ips'] = []
+    elif not isinstance(query.get('group'), str) or (query['group'] and query['group'] not in query.get('groups', [])):
+        return {'ok':False,'code':'invalid_query'}
+    # A validação comum retorna antes do processo quando usada com esse marcador interno.
+    checked = _validar_directory_request(probe)
+    if checked: return {'ok':False,'code':'invalid_query'}
+    if platform.system() != 'Windows': return {'ok':False,'code':'windows_required'}
+    return _run_directory_query(INTERACTIVE_LIST_SCRIPT, query, 'Invoke-MagbelInteractiveList', maximum=262144)
+
 
 def consultar_sessoes_windows(host):
     """Consulta WTS no destino por Kerberos; não conecta nem encerra sessões."""
@@ -953,6 +1073,9 @@ def processar_job(job):
         elif tipo == "ad_buscar":
             resultado = buscar_ad(payload.get("termo", ""), payload.get("tipo", "usuario"))
             status = "concluido"
+        elif tipo == "interactive_list":
+            resultado = consultar_listagem_interativa(payload)
+            status = "concluido" if resultado.get("ok") else "erro"
         elif tipo == "interactive_inspect":
             resultado = consultar_estado_interativo(payload)
             status = "concluido" if resultado.get("ok") else "erro"

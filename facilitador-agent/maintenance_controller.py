@@ -13,8 +13,8 @@ from urllib.parse import urlsplit
 
 from fleet_manager import FleetError, Portal, targets
 
-VERSION = '2.0.10'
-SOURCE_HASH = 'f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496'
+VERSION = '2.0.11'
+SOURCE_HASH = '297eac5c2174f47d0dc213ef5aa80a4c21e12c3288923274352c5dc6e34dc479'
 
 
 def source_hash(path):
@@ -56,7 +56,7 @@ class Controller:
         # argv nunca contém senha, sessão web nem token do agente.
         command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(self.package/'manutencao-agente.ps1'),
                    '-ComputerName', op['hostname'], '-OperationId', op['id'], '-Action', action,
-                   '-AgentSourcePath', str(self.package/'facilitador-agent.py')]
+                   '-AgentSourcePath', str(self.package/'facilitador-agent.py'), '-PreviousVersion', op['previous_version']]
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', errors='replace')
         deadline = self.clock()+120
         try:
@@ -85,7 +85,7 @@ class Controller:
                     process.communicate()
 
     def run_operation(self, op):
-        if op['hostname'].lower() not in self.hosts or op['target_version'] != VERSION or not __import__('re').fullmatch(r'[a-f0-9]{32}', op['id']):
+        if op['hostname'].lower() not in self.hosts or op['target_version'] != VERSION or op.get('previous_version') not in ('2.0.9', '2.0.10') or not __import__('re').fullmatch(r'[a-f0-9]{32}', op['id']):
             raise FleetError('Plano fora dos destinos/versão autorizados nesta estação.')
         print(op['agent_id']+': aguardando drenagem e zero trabalhos.', flush=True)
         if not self.wait(op, 'draining', lambda a: a['running'] == 0 and a['desired'] == 'drain', 600):
@@ -143,7 +143,7 @@ def main(argv=None):
     hosts = [host for host, _ in targets(args.hosts)]
     package = args.package.resolve()
     if source_hash(package/'facilitador-agent.py') != SOURCE_HASH:
-        raise FleetError('Pacote de código fora da referência 2.0.10.')
+        raise FleetError('Pacote de código fora da referência 2.0.11.')
     helper = package/'manutencao-agente.ps1'
     # Validação da confiança Authenticode no próprio Windows; sem bypass de política.
     encoded_path = base64.b64encode(str(helper).encode('utf-8')).decode('ascii')
@@ -170,5 +170,6 @@ if __name__ == '__main__':
         raise SystemExit(1)
     except KeyboardInterrupt:
         print('Conector encerrado; operações interrompidas exigem conferência antes de repetir.')
+
 
 
