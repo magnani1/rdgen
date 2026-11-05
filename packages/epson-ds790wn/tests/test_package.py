@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +85,46 @@ class PackageTest(unittest.TestCase):
             output.writestr('../escape.txt', b'bad')
         with self.assertRaisesRegex(ValueError, 'Unsafe archive'):
             builder.build(self.root, self.launcher)
+
+    def unfinished_release(self):
+        archive, _ = builder.build(self.root, self.launcher)
+        for name in ('catalog.json', 'release-proof.json'):
+            (archive.parent / name).unlink()
+        return archive
+
+    def test_path_rename_may_return_none_on_old_python(self):
+        rename = Path.rename
+        def legacy_rename(path, target):
+            rename(path, target)
+            return None
+        with mock.patch.object(Path, 'rename', legacy_rename):
+            archive, _ = builder.build(self.root, self.launcher)
+        self.assertTrue(archive.is_file())
+
+    def test_finalize_existing_does_not_rebuild_or_modify_archive(self):
+        archive = self.unfinished_release()
+        before = (builder.sha(archive), archive.stat().st_mtime_ns)
+        with mock.patch.object(builder, 'append_zip', side_effect=AssertionError('rebuild forbidden')):
+            final, spec = builder.build(self.root, self.launcher, finalize_existing=True)
+        self.assertEqual(final, archive)
+        self.assertEqual(before, (spec['sha256'], archive.stat().st_mtime_ns))
+        with self.assertRaises(FileExistsError):
+            builder.build(self.root, self.launcher, finalize_existing=True)
+
+    def test_finalize_rejects_extra_archive_member(self):
+        archive = self.unfinished_release()
+        with zipfile.ZipFile(archive, 'a') as output:
+            output.writestr('unexpected.exe', b'bad')
+        with self.assertRaisesRegex(ValueError, 'members differ'):
+            builder.build(self.root, self.launcher, finalize_existing=True)
+        self.assertFalse((archive.parent / 'catalog.json').exists())
+
+    def test_finalize_rejects_changed_input(self):
+        archive = self.unfinished_release()
+        (self.root / 'work/scan2/Setup.exe').write_bytes(b'changed-original')
+        with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+            builder.build(self.root, self.launcher, finalize_existing=True)
+        self.assertFalse((archive.parent / 'catalog.json').exists())
 
     def test_cannot_target_old_version(self):
         with self.assertRaises(ValueError):

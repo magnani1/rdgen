@@ -88,3 +88,18 @@ do procedimento real de registro do servidor, ainda nao fornecido nesta entrega.
 6. Antes de publicar para frota: testar instalacao limpa e componentes faltantes,
    incluindo VC++ ausente, igual e mais novo. O caso DCP faltante + VC++ mais novo
    permanece pendente ate tratar o bootstrapper oficial.
+
+## Retomar montagem interrompida depois do rename
+
+Algumas versoes antigas de Python retornam None em Path.rename. A montagem
+inicial podia terminar machine.zip e falhar antes de produzir catalog.json.
+O builder agora separa a renomeacao da atribuicao do caminho.
+
+Se machine.zip ja existe, mas catalog.json e release-proof.json nao existem,
+atualizar este fonte pelo Git e acrescentar --finalize-existing ao comando.
+A retomada confere todos os membros e seus hashes contra os componentes de
+origem e o launcher assinado, antes de produzir metadados novos. Nao recompacta,
+nao modifica machine.zip, nao sobrescreve metadados existentes e nao publica.
+Se houver arquivo pendente, membro adicional, duplicado, alterado ou origem
+diferente, a retomada para sem criar o catalogo. Teste de regressao simula
+Path.rename retornando None, alem de verificar preservacao e rejeicoes.

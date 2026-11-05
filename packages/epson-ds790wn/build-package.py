@@ -11,12 +11,16 @@ VERSION = '2026.11.5.1'
 PACKAGE = 'TJPB.Epson.DS790WN'
 
 
-def sha(path):
+def stream_sha(stream):
     digest = hashlib.sha256()
-    with path.open('rb') as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b''):
-            digest.update(block)
+    for block in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(block)
     return digest.hexdigest()
+
+
+def sha(path):
+    with path.open('rb') as stream:
+        return stream_sha(stream)
 
 
 def safe_name(name):
@@ -35,7 +39,38 @@ def append_zip(output, archive, prefix):
                     shutil.copyfileobj(src, dst, 1024 * 1024)
 
 
-def build(root, launcher, version=VERSION):
+def verify_existing(archive, launcher, files, scan, ocr, dcp, net):
+    expected = {}
+
+    def add(name, digest):
+        if name in expected:
+            raise ValueError('Duplicate package input: ' + name)
+        expected[name] = digest
+
+    for name in files.values():
+        add(name, sha(launcher / name))
+    for source, prefix in ((scan, 'Scan2'), (ocr, 'ScanOCR')):
+        for path in sorted(source.rglob('*')):
+            if path.is_file():
+                add(prefix + '/' + path.relative_to(source).as_posix(), sha(path))
+    for path, prefix in ((dcp, 'DCP'), (net, 'EpsonNet')):
+        with zipfile.ZipFile(path) as source:
+            for info in source.infolist():
+                name = safe_name(info.filename)
+                if not info.is_dir():
+                    with source.open(info) as stream:
+                        add(prefix + '/' + name, stream_sha(stream))
+    with zipfile.ZipFile(archive) as source:
+        names = [info.filename for info in source.infolist() if not info.is_dir()]
+        if len(names) != len(set(names)) or set(names) != set(expected):
+            raise ValueError('Existing ZIP members differ from the reviewed inputs')
+        for name, digest in expected.items():
+            with source.open(name) as stream:
+                if stream_sha(stream) != digest:
+                    raise ValueError('Existing ZIP content hash mismatch: ' + name)
+
+
+def build(root, launcher, version=VERSION, finalize_existing=False):
     if version != VERSION:
         raise ValueError('This reviewed source requires version ' + VERSION)
     proof = json.loads((launcher / 'launcher-proof.json').read_text(encoding='utf-8-sig'))
@@ -57,19 +92,27 @@ def build(root, launcher, version=VERSION):
         if not path.is_file():
             raise ValueError('Required input missing: ' + str(path))
     destination = root / 'packages/EPSON' / PACKAGE / version / 'x86'
-    if destination.exists():
-        raise FileExistsError('Release already exists; preserved: ' + str(destination))
-    destination.mkdir(parents=True)
-    archive = destination / 'machine.next.zip'
-    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as output:
-        for name in files.values():
-            output.write(launcher / name, name)
-        for source, prefix in ((scan, 'Scan2'), (ocr, 'ScanOCR')):
-            for path in sorted(source.rglob('*')):
-                if path.is_file():
-                    output.write(path, prefix + '/' + path.relative_to(source).as_posix())
-        append_zip(output, dcp, 'DCP')
-        append_zip(output, net, 'EpsonNet')
+    if finalize_existing:
+        archive = destination / 'machine.zip'
+        if not archive.is_file() or (destination / 'machine.next.zip').exists():
+            raise ValueError('Finalization requires a completed machine.zip without a pending archive')
+        if any((destination / name).exists() for name in ('catalog.json', 'release-proof.json')):
+            raise FileExistsError('Release metadata already exists; preserved')
+        verify_existing(archive, launcher, files, scan, ocr, dcp, net)
+    else:
+        if destination.exists():
+            raise FileExistsError('Release already exists; preserved: ' + str(destination))
+        destination.mkdir(parents=True)
+        archive = destination / 'machine.next.zip'
+        with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as output:
+            for name in files.values():
+                output.write(launcher / name, name)
+            for source, prefix in ((scan, 'Scan2'), (ocr, 'ScanOCR')):
+                for path in sorted(source.rglob('*')):
+                    if path.is_file():
+                        output.write(path, prefix + '/' + path.relative_to(source).as_posix())
+            append_zip(output, dcp, 'DCP')
+            append_zip(output, net, 'EpsonNet')
     with zipfile.ZipFile(archive) as check:
         if check.testzip() is not None:
             raise ValueError('Archive integrity failed')
@@ -77,7 +120,9 @@ def build(root, launcher, version=VERSION):
             raise ValueError('DCP AllUsers profile configuration missing')
         if check.read('DCP/arquivo_perfil_digitalizacao.jxz') != profile.read_bytes():
             raise ValueError('DCP profile differs from institutional input')
-    archive = archive.rename(destination / 'machine.zip')
+    if not finalize_existing:
+        archive.rename(destination / 'machine.zip')
+        archive = destination / 'machine.zip'
     spec = {'id': PACKAGE, 'name': 'Epson-DS-790WN', 'version': version,
             'description': 'Componentes ausentes e cadastro DNS opcional; preserva instalacoes compativeis.',
             'file': 'machine.zip', 'sha256': sha(archive), 'type': 'zip',
@@ -94,6 +139,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path('/dados/docker/winget'))
     parser.add_argument('--launcher', type=Path, required=True)
+    parser.add_argument('--finalize-existing', action='store_true',
+                        help='Verify every member of an already completed ZIP and create missing metadata; do not rebuild')
     args = parser.parse_args()
-    archive, spec = build(args.root, args.launcher)
+    archive, spec = build(args.root, args.launcher, finalize_existing=args.finalize_existing)
     print(json.dumps({'archive': str(archive), 'sha256': spec['sha256'], 'published': False}))
