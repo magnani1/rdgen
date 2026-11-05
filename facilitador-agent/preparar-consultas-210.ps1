@@ -32,7 +32,7 @@ Copy-Item -LiteralPath (Join-Path $Repo 'facilitador-agent') -Destination $Sourc
 $Text=[IO.File]::ReadAllText((Join-Path $Source 'facilitador-agent.py')).Replace("`r`n","`n").TrimEnd([char[]]"`r`n")+"`n"
 $Hasher=[Security.Cryptography.SHA256]::Create()
 try {$Hash=[BitConverter]::ToString($Hasher.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($Text))).Replace('-','').ToLowerInvariant()} finally {$Hasher.Dispose()}
-if ($Hash -ne 'bbf498d335fa0fdb9f8aaf81fa7880c48db7635bc60450d8ae883cb1aea4e3cf') {throw 'Esta preparação exige o agente 2.0.10 revisado; confira o commit do checkout.'}
+if ($Hash -ne 'f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496') {throw 'Esta preparação exige o agente 2.0.10 revisado; confira o commit do checkout.'}
 $Prepare=Join-Path $Source 'preparar-manutencao-permanente.ps1'
 $Signature=Set-AuthenticodeSignature -FilePath $Prepare -Certificate $Certificate -HashAlgorithm SHA256
 if ($Signature.Status -ne 'Valid') {throw 'Assinatura do preparador não validada.'}

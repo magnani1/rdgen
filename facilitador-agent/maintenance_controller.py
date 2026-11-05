@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from fleet_manager import FleetError, Portal, targets
 
 VERSION = '2.0.10'
-SOURCE_HASH = 'bbf498d335fa0fdb9f8aaf81fa7880c48db7635bc60450d8ae883cb1aea4e3cf'
+SOURCE_HASH = 'f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496'
 
 
 def source_hash(path):

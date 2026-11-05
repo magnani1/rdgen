@@ -161,12 +161,12 @@ def consultar_estado_interativo(payload):
         return {'ok': False, 'code': 'windows_required'}
     # Dados vão como JSON base64: não concatenar valores em expressões PowerShell.
     encoded = base64.b64encode(json.dumps(request, ensure_ascii=False).encode('utf-8')).decode('ascii')
-    script = INTERACTIVE_QUERY_SCRIPT + "\ntry { $Request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded + "')) | ConvertFrom-Json; Invoke-MagbelInteractiveReadOnly $Request | ConvertTo-Json -Depth 8 -Compress } catch { $Code='directory_query_failed'; if ($_.Exception.Message -in @('execution_identity_mismatch','scope_not_confirmed','query_limit_exceeded','ambiguous_directory_object')) {$Code=$_.Exception.Message}; @{ok=$false;code=$Code} | ConvertTo-Json -Compress }"
+    script = INTERACTIVE_QUERY_SCRIPT + "\ntry { $Request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())) | ConvertFrom-Json; Invoke-MagbelInteractiveReadOnly $Request | ConvertTo-Json -Depth 8 -Compress } catch { $Code='directory_query_failed'; if ($_.Exception.Message -in @('execution_identity_mismatch','scope_not_confirmed','query_limit_exceeded','ambiguous_directory_object')) {$Code=$_.Exception.Message}; @{ok=$false;code=$Code} | ConvertTo-Json -Compress }"
     command = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
     try:
         executable = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
         result = subprocess.run([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', command],
-                                capture_output=True, encoding='utf-8', errors='replace', timeout=60)
+                                input=encoded, capture_output=True, encoding='utf-8', errors='replace', timeout=60)
         if result.returncode or len(result.stdout) > 65536:
             return {'ok': False, 'code': 'directory_query_failed'}
         data = json.loads(result.stdout.lstrip('\ufeff').strip())

@@ -8,7 +8,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ((Get-AuthenticodeSignature -LiteralPath $PSCommandPath).Status -ne 'Valid') { throw 'Assine esta cópia do helper na estação administrativa.' }
-$Expected = 'bbf498d335fa0fdb9f8aaf81fa7880c48db7635bc60450d8ae883cb1aea4e3cf'
+$Expected = 'f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496'
 $PreviousHash = '4c3632ea937cd70490e883fd8abcd1e672b5d4d1aebbaf9406765e02b854167d'
 $Text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).ProviderPath).Replace("`r`n","`n").TrimEnd([char[]]"`r`n")+"`n"
 $Bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)

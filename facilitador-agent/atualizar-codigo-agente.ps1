@@ -10,7 +10,7 @@ if (-not $ConfirmarDrenadoSemTrabalhos) { throw 'Drene, confira zero trabalhos e
 if ((Get-AuthenticodeSignature -FilePath $PSCommandPath).Status -ne 'Valid') { throw 'Assine a cópia deste atualizador na estação administrativa.' }
 # Agente 2.0.10 revisado. Canonicalização: UTF-8 sem BOM, LF e uma quebra final.
 # A referência não é recebida do painel nem de um arquivo de hash não autenticado.
-$ExpectedHash = 'bbf498d335fa0fdb9f8aaf81fa7880c48db7635bc60450d8ae883cb1aea4e3cf'
+$ExpectedHash = 'f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496'
 $Text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).ProviderPath)
 $Text = $Text.Replace("`r`n", "`n").TrimEnd([char[]]"`r`n") + "`n"
 $Bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)

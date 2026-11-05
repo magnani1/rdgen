@@ -35,6 +35,9 @@ class InteractiveInspectTests(unittest.TestCase):
                 self.assertNotIn('Get-Credential', code)
                 self.assertNotIn('TJ-PB\\facilitador-servico', code)
                 self.assertIn('FromBase64String', code)
+                self.assertIn('[Console]::In.ReadToEnd()', code)
+                self.assertLess(len(argv[-1]), 25000)
+                self.assertEqual(json.loads(base64.b64decode(run.call_args.kwargs['input'])), self.payload(profile)['query'])
 
     def test_extra_fields_ldap_filters_bad_server_scope_and_expiry_are_rejected(self):
         samples = []
