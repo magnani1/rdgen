@@ -39,13 +39,13 @@ jobs:
       - shell: pwsh
         run: ./facilitador-agent/tests/test_code_update.ps1
       - shell: pwsh
-        run: ./facilitador-agent/tests/test_maintenance.ps1
-      - shell: pwsh
-        run: ./facilitador-agent/tests/test_worker_logs.ps1
-      - shell: pwsh
         run: ./facilitador-agent/tests/test_guard_exit.ps1
       - shell: powershell
         run: ./facilitador-agent/tests/test_guard_exit.ps1
+      - shell: pwsh
+        run: ./facilitador-agent/tests/test_maintenance.ps1
+      - shell: pwsh
+        run: ./facilitador-agent/tests/test_worker_logs.ps1
       - shell: pwsh
         run: ./facilitador-agent/tests/test_hml_diagnostics.ps1
   empacotar_assistente:

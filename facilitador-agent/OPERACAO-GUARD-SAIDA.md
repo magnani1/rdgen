@@ -47,3 +47,15 @@ declaracao administrativa do resultado observado. Registrar resultado desconheci
 ou erro no painel, nunca sucesso retroativo sem evidencia. Nao apagar todos os
 marcadores nem matar msiexec/setup para forcar repeticao. O procedimento de
 reconciliacao e separado da correcao e nao ocorre automaticamente ao publica-la.
+
+## Teste nativo comunicado pelo administrador
+
+Na SEDE153729, o administrador executou o teste do commit
+27db6b7854f59173a631505400265e7dbb96f69a e informou:
+`Guard: saidas 0/7/3010, processo rapido/lento, Refresh e logs separados: OK`.
+Isso valida o launcher isolado; nao substitui o aceite da fila guardada, a
+publicacao assinada nem a reconciliacao do marcador anterior.
+
+No CI, a fixture de manutencao usava $State, nome tambem usado pelo bloco
+sob teste. Os mocks agora usam $FixtureState para nao compartilhar o nome.
+As verificacoes de apply/rollback, repeticao e preservacao nao foram relaxadas.

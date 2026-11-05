@@ -29,12 +29,12 @@ try {
     $Fixture=@'
 $ErrorActionPreference='Stop'
 $env:ProgramData=Join-Path $env:MAGBEL_MAINT_TEMP 'ProgramData'
-$State=@{Status='Running';Starts=0;Stops=0}
-function Get-ScheduledTask {param($TaskName) [pscustomobject]@{State=$State.Status;Principal=[pscustomobject]@{LogonType='Password'}}}
+$FixtureState=@{Status='Running';Starts=0;Stops=0}
+function Get-ScheduledTask {param($TaskName) [pscustomobject]@{State=$FixtureState.Status;Principal=[pscustomobject]@{LogonType='Password'}}}
 function Get-CimInstance {param($ClassName,$Filter) return @()}
 function Export-ScheduledTask {param($TaskName) '<Task>fixture</Task>'}
-function Stop-ScheduledTask {param($TaskName) $State.Status='Ready';$State.Stops++}
-function Start-ScheduledTask {param($TaskName) $State.Status='Running';$State.Starts++}
+function Stop-ScheduledTask {param($TaskName) $FixtureState.Status='Ready';$FixtureState.Stops++}
+function Start-ScheduledTask {param($TaskName) $FixtureState.Status='Running';$FixtureState.Starts++}
 function icacls.exe {$global:LASTEXITCODE=0}
 $Block=[scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MAGBEL_MAINT_BLOCK)))
 $Bytes=[Convert]::FromBase64String($env:MAGBEL_MAINT_NEW)
@@ -55,18 +55,18 @@ $BeforeConfig=(Get-FileHash $Config).Hash
 $BeforeIdentity=(Get-FileHash $Identity).Hash
 $Operation='a'*32
 $Result=(& $Block $Id $Operation Apply $Bytes $env:MAGBEL_MAINT_HASH $env:MAGBEL_MAINT_PREVIOUS) | ConvertFrom-Json
-if (-not $Result.Ok -or $State.Stops -ne 1 -or $State.Starts -ne 1) {throw 'ApplyFailed'}
+if (-not $Result.Ok -or $FixtureState.Stops -ne 1 -or $FixtureState.Starts -ne 1) {throw 'ApplyFailed'}
 if ((Get-FileHash $Target).Hash.ToLowerInvariant() -ne $env:MAGBEL_MAINT_HASH) {throw 'NewCodeMismatch'}
 $Repeated=(& $Block $Id $Operation Apply $Bytes $env:MAGBEL_MAINT_HASH $env:MAGBEL_MAINT_PREVIOUS) | ConvertFrom-Json
-if ($Repeated.Ok -or $Repeated.RollbackAvailable -or $State.Starts -ne 1) {throw 'RepeatedUpdateChangedState'}
+if ($Repeated.Ok -or $Repeated.RollbackAvailable -or $FixtureState.Starts -ne 1) {throw 'RepeatedUpdateChangedState'}
 $Rollback=(& $Block $Id $Operation Rollback $Bytes $env:MAGBEL_MAINT_HASH $env:MAGBEL_MAINT_PREVIOUS) | ConvertFrom-Json
-if (-not $Rollback.Ok -or $State.Starts -ne 2 -or (Get-FileHash $Target).Hash.ToLowerInvariant() -ne $env:MAGBEL_MAINT_PREVIOUS) {throw 'RollbackFailed'}
+if (-not $Rollback.Ok -or $FixtureState.Starts -ne 2 -or (Get-FileHash $Target).Hash.ToLowerInvariant() -ne $env:MAGBEL_MAINT_PREVIOUS) {throw 'RollbackFailed'}
 if ((Get-FileHash $Config).Hash -ne $BeforeConfig -or (Get-FileHash $Identity).Hash -ne $BeforeIdentity) {throw 'IdentityChanged'}
 # Um backup adulterado nunca pode ser executado.
 $BackupFile=Join-Path $env:ProgramData ('Magbel\AgentCodeBackups\'+$Id+'\'+$Operation+'\before.py')
 Add-Content $BackupFile '# transport-corruption'
 $Bad=(& $Block $Id $Operation Rollback $Bytes $env:MAGBEL_MAINT_HASH $env:MAGBEL_MAINT_PREVIOUS) | ConvertFrom-Json
-if ($Bad.Ok -or $State.Starts -ne 2) {throw 'CorruptRollbackAccepted'}
+if ($Bad.Ok -or $FixtureState.Starts -ne 2) {throw 'CorruptRollbackAccepted'}
 Write-Host 'PS5.1: apply/rollback reais, identidade/tarefa preservadas, repetição e corrupção recusadas: OK'
 '@
     $Encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Fixture))
