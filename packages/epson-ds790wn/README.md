@@ -103,3 +103,39 @@ nao modifica machine.zip, nao sobrescreve metadados existentes e nao publica.
 Se houver arquivo pendente, membro adicional, duplicado, alterado ou origem
 diferente, a retomada para sem criar o catalogo. Teste de regressao simula
 Path.rename retornando None, alem de verificar preservacao e rejeicoes.
+
+## Cadastrar a versao nova no Wingetty
+
+`register-version.py` roda dentro do container Wingetty existente, em /app,
+com seus modelos e sua configuracao. O modo padrao e somente consulta. --apply
+valida o ZIP completo contra o SHA256 homologado
+23a6771f584d5d88e7a96c51831ab3b8ab445ab47f3576fd93eed3d92c9ec0be,
+exige a versao anterior 2026.10.6.2, faz backup consistente do SQLite com
+integrity_check e salva o catalogo anterior em pasta privada da instancia.
+
+Adiciona somente 2026.11.5.1. Todas as versoes anteriores e seus instaladores
+permanecem no banco. O catalog.json de pacotes passa a apontar o registro ativo
+DS790WN para a versao nova, como fazia update-ds790wn.py, preservando outros IDs.
+Nao troca ds790wn-catalog.json nem altera os scripts antigos. Executar sem outra
+publicacao concorrente. Versao nova existente e divergente bloqueia, sem sobrescrever.
+Repetir uma publicacao identica retorna unchanged. Se o banco foi registrado mas
+a escrita atomica do catalogo falhou, repetir reconhece o registro e completa
+somente o catalogo. O backup indicado no resultado guarda o estado anterior.
+
+Exemplo, a partir do host no diretorio da stack:
+
+```bash
+docker compose exec -T -w /app wingetty python - < FONTE_GIT/packages/epson-ds790wn/register-version.py
+docker compose exec -T -w /app wingetty python - --apply < FONTE_GIT/packages/epson-ds790wn/register-version.py
+```
+
+Nao reinicia a stack nem modifica imagem, volumes, tokens ou certificado. Depois
+conferir winget show --id TJPB.Epson.DS790WN --exact --source TJPB --versions,
+seguido do piloto pelo Facilitador/SYSTEM. A validacao local ja feita cobre
+componentes existentes e cadastro repetido; nao cobre scanner novo, digitalizacao
+fisica ou DCP ausente com VC++ mais novo.
+
+Testes de registro usam Flask-SQLAlchemy e SQLite reais em ambiente temporario,
+com modelos equivalentes aos campos fornecidos pelo operador. Cobrem dry-run,
+backup integro, preservacao da versao antiga, idempotencia, conflito de metadados,
+falha no commit e recuperacao apos falha no catalogo. Nao acessam a instancia real.
