@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.8"
+VERSION = "2.0.9"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -487,8 +487,16 @@ def executar_remota(job_id, payload, script_path):
     open(log_path, "w", encoding="utf-8").close()
 
     parametros = {**(payload.get("fixos") or {}), **(payload.get("parametros") or {})}
-    if parametros:
-        b64 = base64.b64encode(json.dumps(parametros, ensure_ascii=False).encode("utf-8")).decode()
+    nome_scanner = parametros.get('NomeScanner', '')
+    if not isinstance(nome_scanner, str) or len(nome_scanner) > 253 or (nome_scanner and any(
+            not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label)
+            for label in nome_scanner.split('.'))):
+        return {"ok": False, "erro": "Nome DNS do scanner inválido", "linhas": []}
+    # NomeScanner segue pelo argv do worker e params.json privado da tarefa.
+    # Nao gravar este campo no arquivo global de parametros legado.
+    outros_parametros = {k: v for k, v in parametros.items() if k != 'NomeScanner'}
+    if outros_parametros:
+        b64 = base64.b64encode(json.dumps(outros_parametros, ensure_ascii=False).encode("utf-8")).decode()
         for alvo in payload["alvos"]:
             ps = (f'$j=[System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("{b64}"));'
                   f'$s=New-PSSession -ComputerName "{alvo}" -ErrorAction Stop;'
@@ -506,6 +514,8 @@ def executar_remota(job_id, payload, script_path):
                    "-File", EXECUTAR_WINRM, "-ComputerName", alvo, "-FilePath", script_path,
                    "-RemoteLogPath", remote_log_path, "-LogFile", log_path, "-Programa", script_name,
                    "-TimeoutSeconds", str(REMOTE_TIMEOUT_SECONDS)]
+            if nome_scanner:
+                cmd += ['-NomeScanner', nome_scanner]
             with open(os.path.join(LOG_DIR, f"watcher_{job_id}.txt"), "a", encoding="utf-8") as watcher_log:
                 procs.append((subprocess.Popen(cmd, stdout=watcher_log, stderr=subprocess.STDOUT,
                                               text=True, encoding="utf-8", errors="replace"), alvo))  # ← UTF-8

@@ -12,7 +12,7 @@ import maintenance_controller as m
 class ControllerTests(unittest.TestCase):
     def setUp(self):
         self.portal=Mock()
-        self.op={'id':'a'*32,'agent_id':'app1','hostname':'app1.test','previous_version':'2.0.7','target_version':'2.0.8'}
+        self.op={'id':'a'*32,'agent_id':'app1','hostname':'app1.test','previous_version':'2.0.8','target_version':'2.0.9'}
         self.remote=Mock(return_value={'Ok':True})
         self.controller=m.Controller(self.portal,['app1.test'],ROOT,remote=self.remote,pause=lambda _:None)
         self.states=[]
@@ -54,3 +54,4 @@ class ControllerTests(unittest.TestCase):
         self.remote.side_effect=[{'Ok':False,'RollbackAvailable':True},{'Ok':True}]
         self.controller.run_operation(self.op)
         self.assertEqual(self.states,['applying','rolling_back','rolled_back'])
+
