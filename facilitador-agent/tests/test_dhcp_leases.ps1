@@ -40,7 +40,7 @@ try {
         [CmdletBinding()]param([Parameter(ValueFromPipeline=$true)]$Job,[switch]$Wait,[switch]$AutoRemoveJob)
         process {if(-not $Wait -or -not $AutoRemoveJob){throw 'JobMustBeReceived'};$Job}
     }
-    $Request=[pscustomobject]@{execution_account='TJ-PB\facilitador-servico';server='srv02.tjpb.jus.br';discover_scopes=$true;scopes=@();scope='';term='';offset=0;limit=25}
+    $Request=[pscustomobject]@{kind='leases';execution_account='TJ-PB\facilitador-servico';server='srv02.tjpb.jus.br';discover_scopes=$true;scopes=@();scope='';term='';offset=0;limit=25}
     $Result=Invoke-MagbelActiveLeases $Request
     if($Result.total -ne 2 -or $Result.scope_count -ne 2 -or $Result.rows[0].ip -ne '10.0.8.40' -or $script:Called -contains '10.0.9.0'){throw 'ActiveOnlyOrSortingFailed'}
     $script:Called=@();$Request.term='10.6.98.186';$Result=Invoke-MagbelActiveLeases $Request
