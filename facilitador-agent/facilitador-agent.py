@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.11"
+VERSION = "2.0.12"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -136,7 +136,7 @@ def consultar_estado_interativo(payload):
     return _run_directory_query(INTERACTIVE_QUERY_SCRIPT, request, 'Invoke-MagbelInteractiveReadOnly')
 
 
-def _run_directory_query(script_source, request, function_name, maximum=65536):
+def _run_directory_query(script_source, request, function_name, maximum=65536, timeout=60):
     # Dados vão como JSON base64: não concatenar valores em expressões PowerShell.
     encoded = base64.b64encode(json.dumps(request, ensure_ascii=False).encode('utf-8')).decode('ascii')
     script = script_source + "\ntry { $Request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())) | ConvertFrom-Json; __MAGBEL_FUNCTION__ $Request | ConvertTo-Json -Depth 8 -Compress } catch { $Code='directory_query_failed'; if ($_.Exception.Message -in @('execution_identity_mismatch','scope_not_confirmed','query_limit_exceeded','ambiguous_directory_object')) {$Code=$_.Exception.Message}; @{ok=$false;code=$Code} | ConvertTo-Json -Compress }"
@@ -145,7 +145,7 @@ def _run_directory_query(script_source, request, function_name, maximum=65536):
     try:
         executable = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
         result = subprocess.run([executable, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', command],
-                                input=encoded, capture_output=True, encoding='utf-8', errors='replace', timeout=60)
+                                input=encoded, capture_output=True, encoding='utf-8', errors='replace', timeout=timeout)
         if result.returncode or len(result.stdout) > maximum:
             return {'ok': False, 'code': 'directory_query_failed'}
         data = json.loads(result.stdout.lstrip('\ufeff').strip())
@@ -259,7 +259,98 @@ function Invoke-MagbelInteractiveList($Request) {
 }
 '''
 
+DHCP_LEASE_SCRIPT = r'''
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+function Get-MagbelLeaseIdentity { [Security.Principal.WindowsIdentity]::GetCurrent().Name }
+function Test-MagbelLeaseMatch($Row,[string]$Term) {
+    if(-not $Term){return $true}
+    foreach($Value in @($Row.ip,$Row.client_id,$Row.hostname,$Row.description,$Row.scope_id,$Row.scope_name,$Row.scope_description)) {
+        if(([string]$Value).IndexOf($Term,[StringComparison]::OrdinalIgnoreCase) -ge 0){return $true}
+    }
+    $Mac=$Term.Replace(':','').Replace('-','')
+    return $Mac -match '^[0-9A-Fa-f]{2,12}$' -and $Row.client_id.IndexOf($Mac,[StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+function Invoke-MagbelActiveLeases($Request) {
+    $Identity=Get-MagbelLeaseIdentity
+    if($Identity -ine $Request.execution_account){throw 'execution_identity_mismatch'}
+    Import-Module DhcpServer -ErrorAction Stop
+    if($Request.discover_scopes){$Scopes=@(Get-DhcpServerv4Scope -ComputerName $Request.server -ErrorAction Stop | Select-Object -First 2049)}
+    else {
+        $Scopes=@(Get-DhcpServerv4Scope -ComputerName $Request.server -ScopeId ([ipaddress[]]$Request.scopes) -ErrorAction Stop)
+        foreach($Id in $Request.scopes){if(@($Scopes | Where-Object {[string]$_.ScopeId -eq $Id}).Count -ne 1){throw 'scope_not_confirmed'}}
+    }
+    if($Scopes.Count -gt 2048){throw 'query_limit_exceeded'}
+    $Scopes=@($Scopes | Where-Object {[string]$_.State -eq 'Active'})
+    $ById=@{};foreach($Scope in $Scopes){$ById[[string]$Scope.ScopeId]=$Scope}
+    # Um IP completo permite consultar somente os escopos cuja mascara o contem.
+    $Ip=$null
+    if([Net.IPAddress]::TryParse($Request.term,[ref]$Ip) -and $Ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork -and $Ip.ToString() -eq $Request.term){
+        $Bytes=$Ip.GetAddressBytes()
+        $Scopes=@($Scopes | Where-Object {
+            $Network=([ipaddress]$_.ScopeId).GetAddressBytes();$Mask=([ipaddress]$_.SubnetMask).GetAddressBytes();$Match=$true
+            for($i=0;$i -lt 4;$i++){if(($Bytes[$i] -band $Mask[$i]) -ne $Network[$i]){$Match=$false}}
+            $Match
+        })
+    }
+    $Rows=[Collections.Generic.List[object]]::new();$Read=0;$Jobs=@();$Now=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    try {
+        if($Scopes.Count){
+            $Jobs=@($Scopes | Get-DhcpServerv4Lease -ComputerName $Request.server -AsJob -ThrottleLimit 8 -ErrorAction Stop)
+            $Jobs | Receive-Job -Wait -AutoRemoveJob -ErrorAction Stop | ForEach-Object {
+                $Lease=$_;$Read++;if($Read -gt 200000){throw 'query_limit_exceeded'}
+                # Reservas ativas, ofertas, concessoes expiradas ou inativas nao entram nesta consulta dinamica.
+                if([string]$Lease.AddressState -eq 'Active'){
+                    $Id=[string]$Lease.ScopeId
+                    if(-not $ById.ContainsKey($Id) -or [string]$Lease.IPAddress -eq ''){throw 'scope_not_confirmed'}
+                    $Expires=$null
+                    if($Lease.LeaseExpiryTime -and ([datetime]$Lease.LeaseExpiryTime).Year -lt 9999){$Expires=([DateTimeOffset]([datetime]$Lease.LeaseExpiryTime).ToUniversalTime()).ToUnixTimeSeconds()}
+                    if($null -eq $Expires -or $Expires -gt $Now){
+                        $Client=([string]$Lease.ClientId).Replace('-','').Replace(':','').ToUpperInvariant()
+                        if($Client.Length -eq 14 -and $Client.StartsWith('01')){$Client=$Client.Substring(2)}
+                        $Scope=$ById[$Id]
+                        $Row=@{ip=[string]$Lease.IPAddress;client_id=$Client;hostname=[string]$Lease.HostName;description=[string]$Lease.Description;scope_id=$Id;scope_name=[string]$Scope.Name;scope_description=[string]$Scope.Description;state='Active';expires_at=$Expires}
+                        if(Test-MagbelLeaseMatch $Row $Request.term){$Rows.Add($Row);if($Rows.Count -gt 100000){throw 'query_limit_exceeded'}}
+                    }
+                }
+            }
+        }
+    } finally {
+        foreach($Job in $Jobs){if($Job -is [Management.Automation.Job]){if($Job.State -in @('Running','NotStarted','Blocked')){Stop-Job -Job $Job -ErrorAction SilentlyContinue};Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue}}
+    }
+    $Total=$Rows.Count
+    $Page=@($Rows | Sort-Object -Property @{Expression={[version]$_.ip}},scope_id,client_id | Select-Object -Skip $Request.offset -First $Request.limit)
+    return @{ok=$true;profile='dhcp';kind='leases';execution_account=$Identity;checked_at=$Now;offset=$Request.offset;limit=$Request.limit;total=$Total;has_more=($Request.offset+$Page.Count -lt $Total);scope_count=$Scopes.Count;rows=@($Page)}
+}
+'''
+
+def consultar_concessoes_ativas(payload):
+    q = payload.get('query')
+    keys = {'profile','kind','server','execution_account','term','offset','limit','scopes','scope','discover_scopes'}
+    if (payload.get('client_id') != CLIENT_ID or type(payload.get('expires')) is not int
+            or not int(time.time()) < payload['expires'] <= int(time.time())+300 or not isinstance(q, dict)
+            or set(q) != keys or q['profile'] != 'dhcp' or q['kind'] != 'leases' or q['scope'] != ''
+            or not isinstance(q['term'],str) or len(q['term'])>80 or any(ord(c)<32 or ord(c)==127 for c in q['term'])
+            or type(q['offset']) is not int or not 0<=q['offset']<=100000
+            or type(q['limit']) is not int or not 1<=q['limit']<=50 or type(q['discover_scopes']) is not bool
+            or not isinstance(q['scopes'],list) or len(q['scopes'])>2048
+            or (q['discover_scopes'] and q['scopes']) or (not q['discover_scopes'] and not q['scopes'])):
+        return {'ok':False,'code':'invalid_query'}
+    import ipaddress
+    try:
+        for scope in q['scopes']:
+            if not isinstance(scope,str) or str(ipaddress.IPv4Address(scope)) != scope: raise ValueError()
+    except ValueError: return {'ok':False,'code':'invalid_query'}
+    probe={k:q[k] for k in ('profile','server','execution_account')}
+    probe.update(scope='0.0.0.0',ips=[],macs=[])
+    if _validar_directory_request(probe):return {'ok':False,'code':'invalid_query'}
+    if platform.system() != 'Windows':return {'ok':False,'code':'windows_required'}
+    return _run_directory_query(DHCP_LEASE_SCRIPT,q,'Invoke-MagbelActiveLeases',maximum=262144,timeout=180)
+
+
 def consultar_listagem_interativa(payload):
+    if isinstance(payload.get('query'),dict) and payload['query'].get('profile') == 'dhcp' and payload['query'].get('kind') == 'leases':
+        return consultar_concessoes_ativas(payload)
     query = payload.get('query')
     if (payload.get('client_id') != CLIENT_ID or type(payload.get('expires')) is not int
             or not int(time.time()) < payload['expires'] <= int(time.time())+180 or not isinstance(query, dict)):
@@ -1228,3 +1319,4 @@ if __name__ == "__main__":
         print("Identidade inscrita; token salvo na pasta protegida.")
     else:
         loop()
+
