@@ -13,7 +13,7 @@ try {
     foreach ($Node in $Ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]},$true)) {
         if ($Allowed -notcontains $Node.GetCommandName()) { throw ('Comando não autorizado: '+$Node.GetCommandName()) }
     }
-    $Updater=Join-Path $PSScriptRoot '..\atualizar-concessoes-212.ps1'
+    $Updater=Join-Path $PSScriptRoot '..\atualizar-escopos-iot-213.ps1'
     [Management.Automation.Language.Parser]::ParseFile($Updater,[ref]$Tokens,[ref]$Errors) | Out-Null
     if ($Errors.Count) { throw 'Sintaxe inválida no atualizador 2.0.12.' }
     $PythonText=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\facilitador-agent.py')).Replace("`r`n","`n").TrimEnd([char[]]"`r`n")+"`n"
