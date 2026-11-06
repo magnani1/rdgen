@@ -13,8 +13,8 @@ from urllib.parse import urlsplit
 
 from fleet_manager import FleetError, Portal, targets
 
-VERSION = '2.0.13'
-SOURCE_HASH = 'dae163b20cea497759175fcb1f45b3a1c9d41eef38016466020e8d9f5dae236f'
+VERSION = '2.0.14'
+SOURCE_HASH = '8950ef30ddd357801ea2b0832c5e52d22ca45df71aff0ecae7fc1064fe28f06d'
 
 
 def source_hash(path):
@@ -85,7 +85,7 @@ class Controller:
                     process.communicate()
 
     def run_operation(self, op):
-        if op['hostname'].lower() not in self.hosts or op['target_version'] != VERSION or op.get('previous_version') not in ('2.0.9', '2.0.10', '2.0.11', '2.0.12') or not __import__('re').fullmatch(r'[a-f0-9]{32}', op['id']):
+        if op['hostname'].lower() not in self.hosts or op['target_version'] != VERSION or op.get('previous_version') not in ('2.0.9', '2.0.10', '2.0.11', '2.0.12', '2.0.13') or not __import__('re').fullmatch(r'[a-f0-9]{32}', op['id']):
             raise FleetError('Plano fora dos destinos/versão autorizados nesta estação.')
         print(op['agent_id']+': aguardando drenagem e zero trabalhos.', flush=True)
         if not self.wait(op, 'draining', lambda a: a['running'] == 0 and a['desired'] == 'drain', 600):
@@ -143,7 +143,7 @@ def main(argv=None):
     hosts = [host for host, _ in targets(args.hosts)]
     package = args.package.resolve()
     if source_hash(package/'facilitador-agent.py') != SOURCE_HASH:
-        raise FleetError('Pacote de código fora da referência 2.0.13.')
+        raise FleetError('Pacote de código fora da referência 2.0.14.')
     helper = package/'manutencao-agente.ps1'
     # Validação da confiança Authenticode no próprio Windows; sem bypass de política.
     encoded_path = base64.b64encode(str(helper).encode('utf-8')).decode('ascii')

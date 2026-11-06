@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.13"
+VERSION = "2.0.14"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -407,22 +407,30 @@ IOT_ACTION_SCRIPT = r'''
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 function Get-MagbelIotIdentity {[Security.Principal.WindowsIdentity]::GetCurrent().Name}
+function ConvertTo-MagbelIotFilterDn([string]$DN) {$DN.Replace('\','\5c').Replace([string][char]0,'\00').Replace('*','\2a').Replace('(','\28').Replace(')','\29')}
 function Get-MagbelIotState($Q,$R) {
-    $Users=@(Get-ADUser -LDAPFilter "(sAMAccountName=$($R.mac))" -Server $Q.server -Properties Description,Enabled,MemberOf,LockedOut,PasswordNeverExpires,userWorkstations,uSNChanged -ErrorAction Stop)
+    $Users=@(Get-ADUser -LDAPFilter "(sAMAccountName=$($R.mac))" -Server $Q.server -Properties Description,Enabled,MemberOf,LockedOut,PasswordNeverExpires,userWorkstations,uSNChanged,primaryGroupID -ErrorAction Stop)
     if($Users.Count -gt 1){throw 'ambiguous_directory_object'}
     $U=$null;$Profiles=@();$Direct=@();$Guid='';$Version='';$Enabled=$null;$Desc=''
     if($Users.Count){
         $U=$Users[0]
         if(-not ([string]$U.DistinguishedName).EndsWith(','+$Q.base_dn,[StringComparison]::OrdinalIgnoreCase)){throw 'iot_outside_ou'}
         $Guid=[string]$U.ObjectGUID;$Version=[string]$U.uSNChanged;$Enabled=[bool]$U.Enabled;$Desc=[string]$U.Description
-        foreach($G in @(Get-ADAccountAuthorizationGroup -Identity $U.DistinguishedName -Server $Q.server -ErrorAction Stop)){
+        $DN=ConvertTo-MagbelIotFilterDn $U.DistinguishedName
+        $Primary=([string]$U.SID.AccountDomainSid.Value)+'-'+$U.primaryGroupID
+        if($Primary -notmatch '^S-1-5-21-\d+-\d+-\d+-\d+$'){throw 'iot_operation_failed'}
+        $PG=Get-ADGroup -Identity $Primary -Server $Q.server -ErrorAction Stop
+        if(-not $PG.DistinguishedName){throw 'iot_operation_failed'}
+        $PDN=ConvertTo-MagbelIotFilterDn $PG.DistinguishedName
+        $Filter="(|(member:1.2.840.113556.1.4.1941:=$DN)(member:1.2.840.113556.1.4.1941:=$PDN)(objectSid=$Primary))"
+        foreach($G in @(Get-ADGroup -LDAPFilter $Filter -SearchBase $Q.group_base_dn -SearchScope Subtree -Server $Q.server -ErrorAction Stop | Sort-Object DistinguishedName)){
             if(([string]$G.DistinguishedName).EndsWith(','+$Q.group_base_dn,[StringComparison]::OrdinalIgnoreCase) -and $G.Name -notin @('Senha_Simples','Senha_TJPB')){
-                $Profiles+=@{name=[string]$G.Name;dn=[string]$G.DistinguishedName;direct=(@($U.MemberOf) -contains $G.DistinguishedName)}
+                $Profiles+= [ordered]@{name=[string]$G.Name;dn=[string]$G.DistinguishedName;direct=(@($U.MemberOf) -contains $G.DistinguishedName)}
             }
         }
         $Direct=@($U.MemberOf | Sort-Object)
     }
-    $State=[ordered]@{guid=$Guid;version=$Version;members=$Direct;exists=($null -ne $U)}
+    $State=[ordered]@{guid=$Guid;version=$Version;members=$Direct;profiles=$Profiles;exists=($null -ne $U)}
     $Bytes=[Text.Encoding]::UTF8.GetBytes(($State|ConvertTo-Json -Depth 5 -Compress));$H=[Security.Cryptography.SHA256]::Create()
     try{$Fingerprint=[BitConverter]::ToString($H.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant()}finally{$H.Dispose()}
     return @{user=$U;profiles=@($Profiles);public=@{mac=$R.mac;exists=($null -ne $U);enabled=$Enabled;description=$Desc;groups=@($Profiles|ForEach-Object {$_.name});fingerprint=$Fingerprint}}
