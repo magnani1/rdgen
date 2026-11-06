@@ -22,7 +22,7 @@ class ListingTests(unittest.TestCase):
         return {'client_id':'TJPB','expires':int(time.time())+120,'query':q}
 
     def test_only_fixed_function_and_encoded_stdin_are_used(self):
-        for profile in ('iot','dhcp'):
+        for profile in ('iot',):
             p=self.payload(profile)
             with patch.object(agent.platform,'system',return_value='Windows'),patch.object(agent.subprocess,'run',return_value=Mock(returncode=0,stdout='{"ok":true}')) as run:
                 self.assertTrue(agent.consultar_listagem_interativa(p)['ok'])
@@ -47,3 +47,4 @@ class ListingTests(unittest.TestCase):
             run.assert_not_called()
 
 if __name__=='__main__':unittest.main()
+

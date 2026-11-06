@@ -55,6 +55,14 @@ try {
     if($Result.total -ne 0 -or $Result.rows.Count -ne 0){throw 'EmptyResultFailed'}
     $Request.term='';$Request.discover_scopes=$false;$Request.scopes=@('10.6.96.0');$Result=Invoke-MagbelActiveLeases $Request
     if($Result.total -ne 1 -or $Result.scope_count -ne 1){throw 'ScopePolicyFailed'}
+    $Request.kind='scopes';$Request.discover_scopes=$true;$Request.scopes=@();$Request.scope='';$Request.term='';$Request.limit=2048;$script:Called=@()
+    $Result=Invoke-MagbelActiveLeases $Request
+    if($Result.total -ne 2 -or $script:Called.Count -ne 0 -or $Result.rows[1].description -ne 'Rede corporativa'){throw 'ScopeListQueriedLeasesOrLostDescription'}
+    $Request.term='JPA Sede';$Result=Invoke-MagbelActiveLeases $Request
+    if($Result.total -ne 1 -or $Result.rows[0].id -ne '10.6.96.0'){throw 'ScopeFilterFailed'}
+    $Request.kind='leases';$Request.scope='10.6.96.0';$Request.term='';$Request.limit=25;$script:Called=@()
+    $Result=Invoke-MagbelActiveLeases $Request
+    if($Result.total -ne 1 -or $script:Called.Count -ne 1 -or $script:Called[0] -ne '10.6.96.0'){throw 'SelectedScopeNotEnforced'}
     function Get-DhcpServerv4Lease {throw 'AccessDenied'}
     $Failed=$false;try{Invoke-MagbelActiveLeases $Request|Out-Null}catch{$Failed=$true}
     if(-not $Failed){throw 'AccessErrorWasHidden'}

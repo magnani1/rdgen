@@ -1,4 +1,4 @@
-name: Validar consultas interativas somente leitura
+name: Validar consultas e ações IoT simuladas
 on:
   pull_request:
   push:
@@ -33,3 +33,9 @@ jobs:
         run: ./facilitador-agent/tests/test_dhcp_leases.ps1
       - shell: pwsh
         run: ./facilitador-agent/tests/test_dhcp_leases.ps1
+
+      - run: python -m unittest discover -s facilitador-agent/tests -p test_iot_actions.py -v
+      - shell: powershell
+        run: ./facilitador-agent/tests/test_iot_actions.ps1
+      - shell: pwsh
+        run: ./facilitador-agent/tests/test_iot_actions.ps1

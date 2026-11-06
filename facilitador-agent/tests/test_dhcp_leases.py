@@ -7,7 +7,7 @@ spec=importlib.util.spec_from_file_location('lease_agent',ROOT/'facilitador-agen
 class LeaseTests(unittest.TestCase):
     def payload(self):
         return {'client_id':'TJPB','expires':int(time.time())+300,'query':{'profile':'dhcp','kind':'leases','server':'srv02.tjpb.jus.br',
-                'execution_account':r'TJ-PB\facilitador-servico','term':'SEDE153729','offset':0,'limit':25,'scopes':[], 'scope':'','discover_scopes':True}}
+                'execution_account':r'TJ-PB\facilitador-servico','term':'SEDE153729','offset':0,'limit':25,'scopes':[], 'scope':'10.6.96.0','discover_scopes':True}}
     def test_fixed_script_encoded_stdin_and_bounded_timeout(self):
         p=self.payload()
         with patch.object(agent.platform,'system',return_value='Windows'),patch.object(agent.subprocess,'run',return_value=Mock(returncode=0,stdout='{"ok":true}')) as run:
@@ -17,14 +17,14 @@ class LeaseTests(unittest.TestCase):
             self.assertEqual(args.kwargs['timeout'],180);self.assertEqual(json.loads(base64.b64decode(args.kwargs['input'])),p['query'])
     def test_invalid_policies_and_input_never_launch(self):
         samples=[]
-        for k,v in [('discover_scopes','true'),('scope','10.6.96.0'),('scopes',['10.6.96.0']),('offset',-1),('limit',51),('command','whoami'),('execution_account','admin'),('server','server;whoami')]:
+        for k,v in [('discover_scopes','true'),('scope','invalid'),('scopes',['10.6.96.0']),('offset',-1),('limit',51),('command','whoami'),('execution_account','admin'),('server','server;whoami')]:
             p=self.payload();p['query'][k]=v;samples.append(p)
         p=self.payload();p['expires']=1;samples.append(p)
         with patch.object(agent.subprocess,'run') as run:
             for p in samples:self.assertFalse(agent.consultar_concessoes_ativas(p)['ok'])
             run.assert_not_called()
     def test_585_explicit_scopes_supported(self):
-        p=self.payload();p['query'].update(discover_scopes=False,scopes=[f'10.{i//256}.{i%256}.0' for i in range(585)])
+        p=self.payload();p['query'].update(scope='10.0.1.0',discover_scopes=False,scopes=[f'10.{i//256}.{i%256}.0' for i in range(585)])
         with patch.object(agent.platform,'system',return_value='Windows'),patch.object(agent.subprocess,'run',return_value=Mock(returncode=0,stdout='{"ok":true}')):
             self.assertTrue(agent.consultar_concessoes_ativas(p)['ok'])
 if __name__=='__main__':unittest.main()
