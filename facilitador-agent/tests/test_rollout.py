@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 root=Path(__file__).resolve().parents[1];sys.path.insert(0,str(root))
 spec=importlib.util.spec_from_file_location('rollout',root/'atualizar-frota.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
@@ -52,5 +52,11 @@ class RolloutTests(unittest.TestCase):
         self.agents[1]['ready']=False
         with self.assertRaises(m.FleetError):m.rollout(self.portal,['app1','app2'])
         self.assertEqual(self.requested,[])
+
+
+    def test_http_origin_is_rejected_before_credentials(self):
+        with patch.object(sys,'argv',['atualizar-frota.py','--agents','app1','--home-url','http://insecure.test']),patch.object(m,'Portal') as portal:
+            with self.assertRaises(m.FleetError):m.main()
+            portal.assert_not_called()
 
 if __name__=='__main__':unittest.main()

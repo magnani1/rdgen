@@ -6,6 +6,7 @@ import re
 import shlex
 import subprocess
 import time
+from urllib.parse import urlsplit
 from fleet_manager import FleetError, Portal
 from maintenance_controller import VERSION, SOURCE_HASH, source_hash
 
@@ -87,7 +88,10 @@ def main():
     root = Path(__file__).resolve().parent
     if source_hash(root/'facilitador-agent.py') != SOURCE_HASH:
         raise FleetError('Checkout fora do código homologado.')
-    if args.backend_ssh and not re.fullmatch(r'[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+', args.backend_ssh):
+    url=urlsplit(args.home_url)
+    if url.scheme!='https' or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in ('','/'):
+        raise FleetError('Use a origem HTTPS do Facilitador, sem credenciais ou caminhos.')
+    if args.backend_ssh and not re.fullmatch(r'[a-zA-Z0-9_][a-zA-Z0-9_.-]*@[a-zA-Z0-9][a-zA-Z0-9_.-]*', args.backend_ssh):
         raise FleetError('Destino SSH inválido.')
     if args.certificate and not re.fullmatch(r'[0-9a-fA-F]{40}', args.certificate):
         raise FleetError('Thumbprint inválido.')
