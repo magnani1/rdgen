@@ -12,7 +12,7 @@ import maintenance_controller as m
 class ControllerTests(unittest.TestCase):
     def setUp(self):
         self.portal=Mock()
-        self.op={'id':'a'*32,'agent_id':'app1','hostname':'app1.test','previous_version':'2.0.9','target_version':'2.0.13'}
+        self.op={'id':'a'*32,'agent_id':'app1','hostname':'app1.test','previous_version':'2.0.9','target_version':'2.0.14'}
         self.remote=Mock(return_value={'Ok':True})
         self.controller=m.Controller(self.portal,['app1.test'],ROOT,remote=self.remote,pause=lambda _:None)
         self.states=[]
@@ -58,3 +58,9 @@ class ControllerTests(unittest.TestCase):
 
 
 
+
+    def test_update_from_213_is_accepted_for_exact_origin_rollback(self):
+        self.op['previous_version']='2.0.13'
+        self.controller.wait=Mock(return_value=True)
+        self.controller.run_operation(self.op)
+        self.remote.assert_called_once_with(self.op,'Apply','applying')

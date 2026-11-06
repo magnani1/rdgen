@@ -12,11 +12,11 @@ try {
     . $Source
     $script:Base='OU=Usuarios,OU=IOTs,OU=TJPB,DC=tjpb,DC=jus,DC=br'
     $script:GB='OU=Grupos,OU=IOTs,OU=TJPB,DC=tjpb,DC=jus,DC=br'
-    $script:Users=@{};$script:Calls=@();$script:Nested=@();$script:FailPassword=$false
+    $script:Users=@{};$script:Calls=@();$script:Nested=@();$script:FailPassword=$false;$script:PrimaryGroup=$null;$script:PrimaryParents=@();$script:FailGroupRead=$false
     function Get-MagbelIotIdentity {'TJ-PB\facilitador-servico'}
     function Import-Module {param($Name,$ErrorAction)}
     function New-FakeUser($Mac,$Members=@()) {
-        $U=[pscustomobject]@{SamAccountName=$Mac;ObjectGUID=[guid]::NewGuid();DistinguishedName="CN=$Mac,$script:Base";uSNChanged=1;Enabled=$false;LockedOut=$true;PasswordNeverExpires=$false;Description='Antiga';MemberOf=@($Members);userWorkstations='ORIGINAL'}
+        $U=[pscustomobject]@{SamAccountName=$Mac;ObjectGUID=[guid]::NewGuid();DistinguishedName="CN=$Mac,$script:Base";uSNChanged=1;Enabled=$false;LockedOut=$true;PasswordNeverExpires=$false;Description='Antiga';MemberOf=@($Members);userWorkstations='ORIGINAL';primaryGroupID=513;SID=[pscustomobject]@{AccountDomainSid=[pscustomobject]@{Value='S-1-5-21-1-2-3'}}}
         $script:Users[$Mac]=$U;return $U
     }
     function Find-FakeUser($Id) {return @($script:Users.Values|Where-Object {$_.ObjectGUID -eq $Id -or $_.DistinguishedName -eq $Id})[0]}
@@ -25,15 +25,28 @@ try {
         $Mac=([regex]::Match($LDAPFilter,'sAMAccountName=([0-9a-f]{12})')).Groups[1].Value
         if($script:Users.ContainsKey($Mac)){$script:Users[$Mac]}
     }
-    function Get-ADGroup {param($LDAPFilter,$SearchBase,$Server,$ErrorAction)
-        if($SearchBase -ne $script:GB -or $Server -ne 'srv03.test'){throw 'WrongGroupScope'}
+    function Get-ADGroup {param($LDAPFilter,$SearchBase,$SearchScope,$Identity,$Server,$ErrorAction)
+        if($Server -ne 'srv03.test'){throw 'WrongServer'}
+        if($script:FailGroupRead){throw 'SimulatedReadFailure'}
+        if($Identity){
+            if($Identity -ne 'S-1-5-21-1-2-3-513'){throw 'WrongPrimarySid'}
+            $DN=if($script:PrimaryGroup){$script:PrimaryGroup}else{'CN=Domain Users,CN=Users,DC=tjpb,DC=jus,DC=br'}
+            return [pscustomobject]@{DistinguishedName=$DN}
+        }
+        if($SearchBase -ne $script:GB){throw 'WrongGroupScope'}
+        if($LDAPFilter.Contains('member:1.2.840.113556.1.4.1941:=')){
+            if($SearchScope -ne 'Subtree' -or -not $LDAPFilter.Contains('(objectSid=S-1-5-21-1-2-3-513)')){throw 'WrongRecursiveQuery'}
+            $Mac=([regex]::Match($LDAPFilter,'CN=([0-9a-f]{12}),')).Groups[1].Value
+            $U=$script:Users[$Mac]
+            foreach($DN in @(@($U.MemberOf)+@($script:Nested)+@($script:PrimaryGroup)+@($script:PrimaryParents)|Where-Object {$_ -and $_.EndsWith(','+$script:GB)}|Sort-Object -Unique)){
+                [pscustomobject]@{Name=($DN -split ',')[0].Substring(3);DistinguishedName=$DN}
+            }
+            return
+        }
         $Name=([regex]::Match($LDAPFilter,'sAMAccountName=([^\)]+)')).Groups[1].Value
         if($Name -in @('wifi-IoT','VOIP','Senha_Simples','Senha_TJPB')){[pscustomobject]@{Name=$Name;DistinguishedName="CN=$Name,$script:GB"}}
     }
-    function Get-ADAccountAuthorizationGroup {param($Identity,$Server,$ErrorAction)
-        $U=Find-FakeUser $Identity
-        foreach($DN in @($U.MemberOf)+@($script:Nested)){[pscustomobject]@{Name=($DN -split ',')[0].Substring(3);DistinguishedName=$DN}}
-    }
+    function Get-ADAccountAuthorizationGroup {throw 'TokenGroupsQueryMustNotRun'}
     function New-ADUser {param($Name,$SamAccountName,$UserPrincipalName,$Path,$Description,$AccountPassword,$Enabled,$LogonWorkstations,[switch]$PassThru,$Server,$ErrorAction)
         if($Enabled -or $Path -ne $script:Base -or $UserPrincipalName -ne ($Name+'@tjpb.jus.br')){throw 'UnsafeInitialAccount'}
         $script:Calls+='create-disabled';$U=New-FakeUser $Name;$U.Description=$Description;$U.userWorkstations=$LogonWorkstations;$U.LockedOut=$false;return $U
@@ -93,6 +106,25 @@ try {
     $R=Invoke-MagbelIotAction $Q;if($R.ok -or $R.code -ne 'iot_state_changed' -or $script:Calls.Count){throw 'StalePlanNotBlocked'}
     $script:Nested=@($Wifi);$R=Invoke-MagbelIotAction (Request 'MIGRAR' '021122334455' 'VOIP');$script:Nested=@()
     if($R.ok -or $R.code -ne 'iot_indirect_membership' -or $script:Calls.Count){throw 'IndirectGroupNotBlocked'}
+    $script:PrimaryGroup=$Wifi
+    $R=Invoke-MagbelIotAction (Request 'MIGRAR' '021122334455' 'VOIP')
+    if($R.ok -or $R.code -ne 'iot_indirect_membership' -or $script:Calls.Count){throw 'PrimaryProfileNotBlocked'}
+    $R=Invoke-MagbelIotAction (Request 'REMOVER_PERFIL' '021122334455' 'wifi-IoT')
+    if($R.ok -or $R.code -ne 'iot_indirect_membership' -or $script:Calls.Count){throw 'PrimaryProfileRemovalNotBlocked'}
+    $script:PrimaryGroup=$null;$script:PrimaryParents=@($Wifi)
+    $R=Invoke-MagbelIotAction (Request 'MIGRAR' '021122334455' 'VOIP')
+    if($R.ok -or $R.code -ne 'iot_indirect_membership' -or $script:Calls.Count){throw 'PrimaryAncestorNotBlocked'}
+    $script:PrimaryParents=@()
+    $Q=Request 'EDITAR' '021122334455' '' 'Outra';$Plan=Invoke-MagbelIotAction $Q
+    $Q.phase='apply';$Q.expected=@($Plan.rows);$script:Nested=@($Wifi)
+    $R=Invoke-MagbelIotAction $Q
+    if($R.ok -or $R.code -ne 'iot_state_changed' -or $script:Calls.Count){throw 'NestedChangeNotBlocked'}
+    $script:Nested=@();$script:FailGroupRead=$true
+    $R=Invoke-MagbelIotAction (Request 'REPARAR')
+    if($R.ok -or $R.uncertain -or $script:Calls.Count){throw 'GroupReadFailureAllowedWrites'}
+    $script:FailGroupRead=$false
+    $Escaped=ConvertTo-MagbelIotFilterDn ('CN=a\*(b)'+[char]0+',OU=Test')
+    if($Escaped -cne 'CN=a\5c\2a\28b\29\00,OU=Test'){throw 'UnsafeLdapFilterEscape'}
     $R=Apply (Request 'REMOVER_PERFIL' '021122334455' 'VOIP')
     if(-not $R.ok -or $U.MemberOf -contains $Voip -or $U.MemberOf -notcontains $Policy){throw 'RemoveSpecificGroupFailed'}
     $script:Calls=@();$R=Apply (Request 'DELETAR' '021122334455')

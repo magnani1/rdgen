@@ -5,18 +5,18 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{32}$')][string]$OperationId,
     [Parameter(Mandatory)][ValidateSet('Apply','Rollback')][string]$Action,
     [Parameter(Mandatory)][string]$AgentSourcePath,
-    [ValidateSet('2.0.9','2.0.10','2.0.11','2.0.12')][string]$PreviousVersion='2.0.9'
+    [ValidateSet('2.0.9','2.0.10','2.0.11','2.0.12','2.0.13')][string]$PreviousVersion='2.0.9'
 )
 $ErrorActionPreference = 'Stop'
 if ((Get-AuthenticodeSignature -LiteralPath $PSCommandPath).Status -ne 'Valid') { throw 'Assine esta cópia do helper na estação administrativa.' }
-$Expected = 'dae163b20cea497759175fcb1f45b3a1c9d41eef38016466020e8d9f5dae236f'
-$PreviousHashes = @{'2.0.9'='4c3632ea937cd70490e883fd8abcd1e672b5d4d1aebbaf9406765e02b854167d';'2.0.10'='f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496';'2.0.11'='297eac5c2174f47d0dc213ef5aa80a4c21e12c3288923274352c5dc6e34dc479';'2.0.12'='956e98d50999a4e7afd6e3ac80efca3d97dff91bce0a048031cd85648a49137c'}
+$Expected = '8950ef30ddd357801ea2b0832c5e52d22ca45df71aff0ecae7fc1064fe28f06d'
+$PreviousHashes = @{'2.0.9'='4c3632ea937cd70490e883fd8abcd1e672b5d4d1aebbaf9406765e02b854167d';'2.0.10'='f56ad3f7d494d570621f55e457ca5ef6485c9f0ce7891be1e8516e13920d7496';'2.0.11'='297eac5c2174f47d0dc213ef5aa80a4c21e12c3288923274352c5dc6e34dc479';'2.0.12'='956e98d50999a4e7afd6e3ac80efca3d97dff91bce0a048031cd85648a49137c';'2.0.13'='dae163b20cea497759175fcb1f45b3a1c9d41eef38016466020e8d9f5dae236f'}
 $PreviousHash = $PreviousHashes[$PreviousVersion]
 $Text = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $AgentSourcePath).ProviderPath).Replace("`r`n","`n").TrimEnd([char[]]"`r`n")+"`n"
 $Bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
 $Hasher = [Security.Cryptography.SHA256]::Create()
 try { $Hash = [BitConverter]::ToString($Hasher.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant() } finally { $Hasher.Dispose() }
-if ($Hash -ne $Expected) { throw 'Código fora da referência homologada 2.0.13.' }
+if ($Hash -ne $Expected) { throw 'Código fora da referência homologada 2.0.14.' }
 $HostId = $ComputerName.Split('.')[0].ToLowerInvariant()
 Invoke-Command -ComputerName $ComputerName -Authentication Kerberos -ConfigurationName Microsoft.PowerShell -ArgumentList $HostId,$OperationId,$Action,$Bytes,$Expected,$PreviousHash -ScriptBlock {
     param($Id,$OperationId,$Action,[byte[]]$Bytes,$Expected,$PreviousHash)
