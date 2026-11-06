@@ -16,7 +16,7 @@ if not HOME_URL.startswith("https://"):
     raise RuntimeError("HOME_URL exige HTTPS")
 STATE_DIR = Path(os.environ.get("AGENT_STATE_DIR", r"C:\ProgramData\Magbel\FacilitadorAgent"))
 TOKEN_FILE = STATE_DIR / "identity.json"
-VERSION = "2.0.12"
+VERSION = "2.0.13"
 BOOT_ID = uuid.uuid4().hex
 CLIENT_ID = os.environ.get("CLIENT_ID", "TJPB").upper()
 IDENTITY = {}
@@ -106,7 +106,7 @@ function Invoke-MagbelInteractiveReadOnly($Request) {
         }
         $Devices = @()
         foreach ($Mac in $Request.macs) {
-            $Found = @(Get-ADUser -LDAPFilter "(sAMAccountName=$Mac)" -SearchBase $Request.base_dn -SearchScope Subtree -Server $Request.server -Properties Enabled,Description,MemberOf -ErrorAction Stop)
+            $Found = @(Get-ADUser -LDAPFilter "(sAMAccountName=$Mac)" -SearchBase $Request.base_dn -SearchScope Subtree -Server $Request.server -Properties Enabled,Description,MemberOf,LastLogonDate -ErrorAction Stop)
             if ($Found.Count -gt 1) { throw 'ambiguous_directory_object' }
             $Memberships = @()
             if ($Found.Count) {
@@ -230,16 +230,16 @@ function Invoke-MagbelInteractiveList($Request) {
         Import-Module ActiveDirectory -ErrorAction Stop
         $Groups=@()
         foreach ($Name in $Request.groups) {
-            $Found=@(Get-ADGroup -LDAPFilter "(sAMAccountName=$Name)" -Server $Request.server -ErrorAction Stop)
+            $Found=@(Get-ADGroup -LDAPFilter "(sAMAccountName=$Name)" -Server $Request.server -Properties Description -ErrorAction Stop)
             if ($Found.Count -gt 1) { throw 'ambiguous_directory_object' }
-            $Groups+=@{name=$Name;exists=($Found.Count -eq 1);dn=if ($Found.Count) {[string]$Found[0].DistinguishedName} else {''}}
+            $Groups+=@{name=$Name;exists=($Found.Count -eq 1);description=if($Found.Count){[string]$Found[0].Description}else{''};dn=if ($Found.Count) {[string]$Found[0].DistinguishedName} else {''}}
         }
         if ($Request.kind -eq 'groups') {
             foreach ($Group in $Groups) {
-                if (-not $Request.term -or $Group.name.IndexOf($Request.term,[StringComparison]::OrdinalIgnoreCase) -ge 0) { $Rows+=@{name=$Group.name;exists=$Group.exists} }
+                if (-not $Request.term -or $Group.name.IndexOf($Request.term,[StringComparison]::OrdinalIgnoreCase) -ge 0) { $Rows+=@{name=$Group.name;exists=$Group.exists;description=$Group.description} }
             }
         } elseif ($Request.kind -eq 'devices') {
-            $All=@(Get-ADUser -LDAPFilter '(&(objectCategory=person)(objectClass=user))' -SearchBase $Request.base_dn -SearchScope Subtree -Server $Request.server -ResultSetSize 2001 -ResultPageSize 200 -Properties Enabled,Description,MemberOf -ErrorAction Stop)
+            $All=@(Get-ADUser -LDAPFilter '(&(objectCategory=person)(objectClass=user))' -SearchBase $Request.base_dn -SearchScope Subtree -Server $Request.server -ResultSetSize 2001 -ResultPageSize 200 -Properties Enabled,Description,MemberOf,LastLogonDate -ErrorAction Stop)
             if ($All.Count -gt 2000) { throw 'query_limit_exceeded' }
             foreach ($User in $All) {
                 $Mac=[string]$User.SamAccountName
@@ -247,7 +247,7 @@ function Invoke-MagbelInteractiveList($Request) {
                 $Memberships=@()
                 foreach ($Group in $Groups) { if ($Group.exists -and @($User.MemberOf) -contains $Group.dn) { $Memberships+=$Group.name } }
                 if ($Request.group -and $Memberships -notcontains $Request.group) { continue }
-                $Row=@{mac=$Mac.ToUpperInvariant();enabled=[bool]$User.Enabled;description=[string]$User.Description;groups=@($Memberships)}
+                $Row=@{mac=$Mac.ToUpperInvariant();enabled=[bool]$User.Enabled;description=[string]$User.Description;last_logon=if($User.LastLogonDate){([DateTimeOffset]([datetime]$User.LastLogonDate).ToUniversalTime()).ToUnixTimeSeconds()}else{$null};groups=@($Memberships)}
                 if (Test-MagbelListMatch $Row $Request.term) { $Rows+=$Row }
             }
         } else { throw 'unsupported_profile' }
@@ -283,6 +283,16 @@ function Invoke-MagbelActiveLeases($Request) {
     if($Scopes.Count -gt 2048){throw 'query_limit_exceeded'}
     $Scopes=@($Scopes | Where-Object {[string]$_.State -eq 'Active'})
     $ById=@{};foreach($Scope in $Scopes){$ById[[string]$Scope.ScopeId]=$Scope}
+    if($Request.kind -eq 'scopes'){
+        $Matches=@($Scopes | Where-Object {-not $Request.term -or ([string]$_.ScopeId+' '+[string]$_.Name+' '+[string]$_.Description).IndexOf($Request.term,[StringComparison]::OrdinalIgnoreCase) -ge 0} | Sort-Object -Property @{Expression={[version][string]$_.ScopeId}})
+        $Page=@($Matches | Select-Object -Skip $Request.offset -First $Request.limit | ForEach-Object { @{id=[string]$_.ScopeId;name=[string]$_.Name;description=[string]$_.Description;mask=[string]$_.SubnetMask;start=[string]$_.StartRange;end=[string]$_.EndRange;state=[string]$_.State} })
+        return @{ok=$true;profile='dhcp';kind='scopes';execution_account=$Identity;checked_at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds();offset=$Request.offset;limit=$Request.limit;total=$Matches.Count;has_more=($Request.offset+$Page.Count -lt $Matches.Count);rows=@($Page)}
+    }
+    if($Request.scope){
+        $Scopes=@($Scopes | Where-Object {[string]$_.ScopeId -eq $Request.scope})
+        if($Scopes.Count -ne 1){throw 'scope_not_confirmed'}
+        $ById=@{}; $ById[$Request.scope]=$Scopes[0]
+    }
     # Um IP completo permite consultar somente os escopos cuja mascara o contem.
     $Ip=$null
     if([Net.IPAddress]::TryParse($Request.term,[ref]$Ip) -and $Ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork -and $Ip.ToString() -eq $Request.term){
@@ -329,15 +339,19 @@ def consultar_concessoes_ativas(payload):
     keys = {'profile','kind','server','execution_account','term','offset','limit','scopes','scope','discover_scopes'}
     if (payload.get('client_id') != CLIENT_ID or type(payload.get('expires')) is not int
             or not int(time.time()) < payload['expires'] <= int(time.time())+300 or not isinstance(q, dict)
-            or set(q) != keys or q['profile'] != 'dhcp' or q['kind'] != 'leases' or q['scope'] != ''
+            or set(q) != keys or q['profile'] != 'dhcp' or q['kind'] not in ('scopes','leases')
+            or not isinstance(q['scope'],str) or (q['kind']=='scopes' and q['scope'])
+            or (q['kind']=='leases' and not q['scope'])
             or not isinstance(q['term'],str) or len(q['term'])>80 or any(ord(c)<32 or ord(c)==127 for c in q['term'])
             or type(q['offset']) is not int or not 0<=q['offset']<=100000
-            or type(q['limit']) is not int or not 1<=q['limit']<=50 or type(q['discover_scopes']) is not bool
+            or type(q['limit']) is not int or not 1<=q['limit']<=(2048 if q['kind']=='scopes' else 50) or type(q['discover_scopes']) is not bool
             or not isinstance(q['scopes'],list) or len(q['scopes'])>2048
             or (q['discover_scopes'] and q['scopes']) or (not q['discover_scopes'] and not q['scopes'])):
         return {'ok':False,'code':'invalid_query'}
     import ipaddress
     try:
+        if q['scope']:
+            if str(ipaddress.IPv4Address(q['scope']))!=q['scope'] or (not q['discover_scopes'] and q['scope'] not in q['scopes']): raise ValueError()
         for scope in q['scopes']:
             if not isinstance(scope,str) or str(ipaddress.IPv4Address(scope)) != scope: raise ValueError()
     except ValueError: return {'ok':False,'code':'invalid_query'}
@@ -345,11 +359,11 @@ def consultar_concessoes_ativas(payload):
     probe.update(scope='0.0.0.0',ips=[],macs=[])
     if _validar_directory_request(probe):return {'ok':False,'code':'invalid_query'}
     if platform.system() != 'Windows':return {'ok':False,'code':'windows_required'}
-    return _run_directory_query(DHCP_LEASE_SCRIPT,q,'Invoke-MagbelActiveLeases',maximum=262144,timeout=180)
+    return _run_directory_query(DHCP_LEASE_SCRIPT,q,'Invoke-MagbelActiveLeases',maximum=4194304 if q['kind']=='scopes' else 262144,timeout=180)
 
 
 def consultar_listagem_interativa(payload):
-    if isinstance(payload.get('query'),dict) and payload['query'].get('profile') == 'dhcp' and payload['query'].get('kind') == 'leases':
+    if isinstance(payload.get('query'),dict) and payload['query'].get('profile') == 'dhcp' and payload['query'].get('kind') in ('scopes','leases'):
         return consultar_concessoes_ativas(payload)
     query = payload.get('query')
     if (payload.get('client_id') != CLIENT_ID or type(payload.get('expires')) is not int
@@ -388,6 +402,144 @@ def consultar_listagem_interativa(payload):
     if platform.system() != 'Windows': return {'ok':False,'code':'windows_required'}
     return _run_directory_query(INTERACTIVE_LIST_SCRIPT, query, 'Invoke-MagbelInteractiveList', maximum=262144)
 
+
+IOT_ACTION_SCRIPT = r'''
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+function Get-MagbelIotIdentity {[Security.Principal.WindowsIdentity]::GetCurrent().Name}
+function Get-MagbelIotState($Q,$R) {
+    $Users=@(Get-ADUser -LDAPFilter "(sAMAccountName=$($R.mac))" -Server $Q.server -Properties Description,Enabled,MemberOf,LockedOut,PasswordNeverExpires,userWorkstations,uSNChanged -ErrorAction Stop)
+    if($Users.Count -gt 1){throw 'ambiguous_directory_object'}
+    $U=$null;$Profiles=@();$Direct=@();$Guid='';$Version='';$Enabled=$null;$Desc=''
+    if($Users.Count){
+        $U=$Users[0]
+        if(-not ([string]$U.DistinguishedName).EndsWith(','+$Q.base_dn,[StringComparison]::OrdinalIgnoreCase)){throw 'iot_outside_ou'}
+        $Guid=[string]$U.ObjectGUID;$Version=[string]$U.uSNChanged;$Enabled=[bool]$U.Enabled;$Desc=[string]$U.Description
+        foreach($G in @(Get-ADAccountAuthorizationGroup -Identity $U.DistinguishedName -Server $Q.server -ErrorAction Stop)){
+            if(([string]$G.DistinguishedName).EndsWith(','+$Q.group_base_dn,[StringComparison]::OrdinalIgnoreCase) -and $G.Name -notin @('Senha_Simples','Senha_TJPB')){
+                $Profiles+=@{name=[string]$G.Name;dn=[string]$G.DistinguishedName;direct=(@($U.MemberOf) -contains $G.DistinguishedName)}
+            }
+        }
+        $Direct=@($U.MemberOf | Sort-Object)
+    }
+    $State=[ordered]@{guid=$Guid;version=$Version;members=$Direct;exists=($null -ne $U)}
+    $Bytes=[Text.Encoding]::UTF8.GetBytes(($State|ConvertTo-Json -Depth 5 -Compress));$H=[Security.Cryptography.SHA256]::Create()
+    try{$Fingerprint=[BitConverter]::ToString($H.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant()}finally{$H.Dispose()}
+    return @{user=$U;profiles=@($Profiles);public=@{mac=$R.mac;exists=($null -ne $U);enabled=$Enabled;description=$Desc;groups=@($Profiles|ForEach-Object {$_.name});fingerprint=$Fingerprint}}
+}
+function Invoke-MagbelIotAction($Q) {
+    $Identity=Get-MagbelIotIdentity
+    if($Identity -ine $Q.execution_account){throw 'execution_identity_mismatch'}
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $Changed=$false;$Done=@();$Prepared=@()
+    try {
+        # Conferir TODOS os objetos e grupos antes de iniciar qualquer escrita.
+        foreach($R in $Q.records){
+            $S=Get-MagbelIotState $Q $R
+            if($Q.action -eq 'CRIAR' -and $S.user){throw 'iot_already_exists'}
+            if($Q.action -ne 'CRIAR' -and -not $S.user){throw 'iot_not_found'}
+            if($Q.phase -eq 'apply'){
+                $Expected=@($Q.expected|Where-Object {$_.mac -ceq $R.mac})
+                if($Expected.Count -ne 1 -or $Expected[0].fingerprint -cne $S.public.fingerprint){throw 'iot_state_changed'}
+            }
+            $Target=$null;$Simple=$null
+            foreach($Name in @($R.group)+$(if($Q.action -in @('CRIAR','REPARAR')){@('Senha_Simples')}else{@()})){
+                if(-not $Name){continue}
+                $Found=@(Get-ADGroup -LDAPFilter "(sAMAccountName=$Name)" -SearchBase $Q.group_base_dn -Server $Q.server -ErrorAction Stop)
+                if($Found.Count -ne 1){throw 'iot_group_not_found'}
+                if($Name -eq 'Senha_Simples'){$Simple=$Found[0]}else{$Target=$Found[0]}
+            }
+            if($Q.action -in @('MIGRAR','REMOVER_PERFIL')){
+                foreach($G in $S.profiles){if(-not $G.direct -and ($Q.action -eq 'MIGRAR' -or $G.dn -ieq $Target.DistinguishedName)){throw 'iot_indirect_membership'}}
+            }
+            $Prepared+=@{record=$R;state=$S;target=$Target;simple=$Simple}
+        }
+        if($Q.phase -eq 'plan'){
+            return @{ok=$true;phase='plan';execution_account=$Identity;checked_at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds();rows=@($Prepared|ForEach-Object {$_.state.public})}
+        }
+        foreach($P in $Prepared){
+            $R=$P.record;$S=$P.state;$U=$S.user
+            # Conferir novamente junto à escrita: um lote não usa estado obsoleto.
+            if((Get-MagbelIotState $Q $R).public.fingerprint -cne $S.public.fingerprint){throw 'iot_state_changed'}
+            $Changed=$true
+            if($Q.action -eq 'CRIAR'){
+                $Random=New-Object byte[] 32;$Rng=[Security.Cryptography.RandomNumberGenerator]::Create()
+                try{$Rng.GetBytes($Random)}finally{$Rng.Dispose()}
+                $Strong=ConvertTo-SecureString ('Aa1!'+[Convert]::ToBase64String($Random)) -AsPlainText -Force
+                $Domain=(@($Q.base_dn -split ','|Where-Object {$_.StartsWith('DC=',[StringComparison]::OrdinalIgnoreCase)}|ForEach-Object {$_.Substring(3)}) -join '.')
+                $U=New-ADUser -Name $R.mac -SamAccountName $R.mac -UserPrincipalName ($R.mac+'@'+$Domain) -Path $Q.base_dn -Description $R.description -AccountPassword $Strong -Enabled $false -LogonWorkstations 'NPSWIN2K12' -PassThru -Server $Q.server -ErrorAction Stop
+            }
+            if($Q.action -in @('CRIAR','REPARAR')){
+                if(@($U.MemberOf) -notcontains $P.simple.DistinguishedName){Add-ADGroupMember -Identity $P.simple.DistinguishedName -Members $U.DistinguishedName -Server $Q.server -ErrorAction Stop}
+                if($Q.action -eq 'CRIAR' -and $P.target){Add-ADGroupMember -Identity $P.target.DistinguishedName -Members $U.DistinguishedName -Server $Q.server -ErrorAction Stop}
+                Set-ADAccountPassword -Identity $U.ObjectGUID -Reset -NewPassword (ConvertTo-SecureString $R.mac -AsPlainText -Force) -Server $Q.server -ErrorAction Stop
+                Set-ADUser -Identity $U.ObjectGUID -PasswordNeverExpires $true -Server $Q.server -ErrorAction Stop
+                if($Q.action -eq 'REPARAR' -and $U.LockedOut){Unlock-ADAccount -Identity $U.ObjectGUID -Server $Q.server -ErrorAction Stop}
+                Enable-ADAccount -Identity $U.ObjectGUID -Server $Q.server -ErrorAction Stop
+            }elseif($Q.action -eq 'EDITAR'){
+                Set-ADUser -Identity $U.ObjectGUID -Description $R.description -Server $Q.server -ErrorAction Stop
+            }elseif($Q.action -eq 'MIGRAR'){
+                # Adicionar o destino primeiro evita retirar o acesso antes de confirmar o novo grupo.
+                if(@($U.MemberOf) -notcontains $P.target.DistinguishedName){Add-ADGroupMember -Identity $P.target.DistinguishedName -Members $U.DistinguishedName -Server $Q.server -ErrorAction Stop}
+                foreach($G in $S.profiles){if($G.dn -ine $P.target.DistinguishedName){Remove-ADGroupMember -Identity $G.dn -Members $U.DistinguishedName -Confirm:$false -Server $Q.server -ErrorAction Stop}}
+            }elseif($Q.action -eq 'REMOVER_PERFIL'){
+                if(@($U.MemberOf) -contains $P.target.DistinguishedName){Remove-ADGroupMember -Identity $P.target.DistinguishedName -Members $U.DistinguishedName -Confirm:$false -Server $Q.server -ErrorAction Stop}
+            }elseif($Q.action -eq 'DELETAR'){
+                Remove-ADUser -Identity $U.ObjectGUID -Confirm:$false -Server $Q.server -ErrorAction Stop
+            }else{throw 'invalid_query'}
+            $After=Get-MagbelIotState $Q $R;$V=$After.user
+            $Valid=if($Q.action -eq 'DELETAR'){-not $V}else{$null -ne $V}
+            if($V){
+                if($Q.action -in @('CRIAR','REPARAR')){$Valid=$Valid -and $V.Enabled -and $V.PasswordNeverExpires -and -not $V.LockedOut -and (@($V.MemberOf) -contains $P.simple.DistinguishedName)}
+                if($Q.action -eq 'CRIAR'){$Valid=$Valid -and $V.userWorkstations -eq 'NPSWIN2K12' -and $V.Description -ceq $R.description -and (-not $P.target -or @($V.MemberOf) -contains $P.target.DistinguishedName)}
+                if($Q.action -eq 'EDITAR'){$Valid=$Valid -and $V.Description -ceq $R.description}
+                if($Q.action -eq 'MIGRAR'){$Valid=$Valid -and (@($V.MemberOf) -contains $P.target.DistinguishedName) -and @($After.profiles|Where-Object {$_.dn -ine $P.target.DistinguishedName}).Count -eq 0}
+                if($Q.action -eq 'REMOVER_PERFIL'){$Valid=$Valid -and @($After.profiles|Where-Object {$_.dn -ieq $P.target.DistinguishedName}).Count -eq 0}
+            }
+            if(-not $Valid){throw 'iot_postcheck_failed'}
+            $Done+=@{mac=$R.mac;confirmed=$true}
+        }
+        return @{ok=$true;phase='apply';execution_account=$Identity;checked_at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds();uncertain=$false;rows=@($Done)}
+    }catch{
+        $Code=[string]$_.Exception.Message
+        if($Code -notin @('iot_already_exists','iot_not_found','iot_group_not_found','iot_state_changed','iot_outside_ou','iot_indirect_membership','iot_postcheck_failed','ambiguous_directory_object')){$Code='iot_operation_failed'}
+        return @{ok=$false;code=$Code;uncertain=$Changed;rows=@($Done)}
+    }
+}
+'''
+
+def executar_iot(payload, phase):
+    q=payload.get('query')
+    keys={'profile','server','execution_account','base_dn','group_base_dn','groups','action','records','phase','expected'}
+    actions={'CRIAR','EDITAR','REPARAR','MIGRAR','REMOVER_PERFIL','DELETAR'}
+    bad=lambda:{'ok':False,'code':'invalid_query','uncertain':False}
+    if (payload.get('client_id')!=CLIENT_ID or type(payload.get('expires')) is not int
+            or not int(time.time())<payload['expires']<=int(time.time())+300 or not isinstance(q,dict)
+            or set(q)!=keys or not isinstance(q['groups'],list) or not isinstance(q['action'],str) or q['profile']!='iot' or q['phase']!=phase or phase not in ('plan','apply')
+            or q['action'] not in actions or not isinstance(q['records'],list) or not 1<=len(q['records'])<=100
+            or not isinstance(q['group_base_dn'],str) or not re.fullmatch(r'(?:OU=[^,=+<>;"\\\r\n]{1,100},)+(?:DC=[A-Za-z0-9-]{1,63},)*DC=[A-Za-z0-9-]{1,63}',q['group_base_dn'])
+            or any(g.lower() in ('senha_simples','senha_tjpb') for g in q.get('groups',[]) if isinstance(g,str))):return bad()
+    probe={k:q[k] for k in ('profile','server','execution_account','base_dn','groups')};probe['macs']=[]
+    seen=set()
+    for r in q['records']:
+        if (not isinstance(r,dict) or set(r)!={'mac','description','group'} or not isinstance(r['mac'],str)
+                or not re.fullmatch(r'[0-9a-f]{12}',r['mac']) or r['mac'] in seen or int(r['mac'][:2],16)&1 or r['mac'] in ('000000000000','ffffffffffff')
+                or not isinstance(r['description'],str) or len(r['description'])>256 or any(ord(c)<32 for c in r['description'])
+                or not isinstance(r['group'],str) or (r['group'] and r['group'] not in q['groups'])
+                or (q['action'] in ('CRIAR','EDITAR') and not r['description'])
+                or (q['action'] in ('MIGRAR','REMOVER_PERFIL') and not r['group'])
+                or (q['action'] not in ('CRIAR','MIGRAR','REMOVER_PERFIL') and r['group'])):return bad()
+        seen.add(r['mac']);probe['macs'].append(r['mac'].upper())
+    if _validar_directory_request(probe):return bad()
+    if not isinstance(q['expected'],list):return bad()
+    if phase=='plan' and q['expected']:return bad()
+    if phase=='apply':
+        if len(q['expected'])!=len(seen) or any(not isinstance(r,dict) or set(r)!={'mac','fingerprint'} or not isinstance(r.get('mac'),str) or not isinstance(r.get('fingerprint'),str) or not re.fullmatch(r'[a-f0-9]{64}',r['fingerprint']) for r in q['expected']):return bad()
+        if {r['mac'] for r in q['expected']}!=seen:return bad()
+    if platform.system()!='Windows':return {'ok':False,'code':'windows_required','uncertain':False}
+    result=_run_directory_query(IOT_ACTION_SCRIPT,q,'Invoke-MagbelIotAction',maximum=262144,timeout=180)
+    if phase=='apply' and not result.get('ok') and 'uncertain' not in result:result['uncertain']=True
+    return result
 
 def consultar_sessoes_windows(host):
     """Consulta WTS no destino por Kerberos; não conecta nem encerra sessões."""
@@ -1157,13 +1309,16 @@ def processar_job(job):
             status = "concluido" if resultado.get("ok") else "erro"
         elif tipo == "executar":
             payload["_iniciado_em"] = datetime.now().isoformat()
-            resultado = executar(job_id, payload)
+            resultado = executar_iot(payload, "apply") if payload.get("engine")=="iot.apply.v1" else executar(job_id, payload)
             status = "concluido" if resultado.get("ok") else "erro"
             gravar_log_json(job_id, payload, status, resultado.get("linhas", []))
             resultado.pop("linhas", None)
         elif tipo == "ad_buscar":
             resultado = buscar_ad(payload.get("termo", ""), payload.get("tipo", "usuario"))
             status = "concluido"
+        elif tipo == "iot_plan":
+            resultado = executar_iot(payload, "plan")
+            status = "concluido" if resultado.get("ok") else "erro"
         elif tipo == "interactive_list":
             resultado = consultar_listagem_interativa(payload)
             status = "concluido" if resultado.get("ok") else "erro"

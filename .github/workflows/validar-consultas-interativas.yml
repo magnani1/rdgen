@@ -1,4 +1,4 @@
-name: Validar consultas interativas somente leitura
+name: Validar consultas e ações IoT simuladas
 on:
   pull_request:
   push:
@@ -16,6 +16,12 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r facilitador-agent/requirements.txt
+
+      - run: python -m unittest discover -s facilitador-agent/tests -p test_iot_actions.py -v
+      - shell: powershell
+        run: ./facilitador-agent/tests/test_iot_actions.ps1
+      - shell: pwsh
+        run: ./facilitador-agent/tests/test_iot_actions.ps1
       - run: python -m unittest discover -s facilitador-agent/tests -p test_interactive_inspect.py -v
       - shell: powershell
         run: ./facilitador-agent/tests/test_interactive_inspect.ps1
