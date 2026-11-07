@@ -45,3 +45,29 @@ sequência nesse caso. Agentes já prontos na versão esperada são ignorados.
 Testes: Portainer/Docker e frota simulados, wrapper analisado/exercitado em CI
 Windows. Acesso SSH, chave Portainer, certificado e ações no ambiente real ainda
 precisam de validação pelo administrador.
+
+
+## Estações com política AllSigned
+
+Não assinar o arquivo dentro do checkout: a assinatura conta como alteração local
+e impede a atualização Git. Executar uma cópia assinada fora do repositório, passando
+-Repo com o caminho real do checkout. As fontes são copiadas desse repositório,
+independentemente da pasta onde está a cópia assinada.
+
+Se -CertificateThumbprint for omitido, o aplicador obtém o thumbprint da própria
+assinatura válida e procura a chave privada correspondente nos certificados My.
+Assim, usa o certificado realmente escolhido por Sign-File, e não o certificado
+de outro instalador. O certificado precisa continuar válido e com chave privada.
+
+Para backend já aplicado, usar -SomenteAgentes. Esse modo prepara o conector e
+atualiza os executores, sem SSH nem novo deploy do backend. -BackendSSH vazio também
+continua suportado, sem encaminhar argumento vazio ao Python.
+
+Antes de restaurar um aplicador assinado no checkout, preservar uma cópia privada
+dele e conferir sua assinatura. Restaurar somente esse arquivo no Git, atualizar
+o checkout e assinar a nova cópia privada. Os demais arquivos locais são preservados.
+
+Exemplo após preparar a cópia assinada:
+~~~powershell
+& "$env:LOCALAPPDATA/Magbel/FacilitadorAtualizacao/aplicar-atualizacao.ps1" -Repo "$env:USERPROFILE/Projetos/rdgen" -SomenteAgentes
+~~~
