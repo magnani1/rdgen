@@ -2,7 +2,9 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidatePattern('^[A-Fa-f0-9]{40}$')][string]$CertificateThumbprint,
+    [ValidatePattern('^(?:[A-Fa-f0-9]{40})?$')][string]$CertificateThumbprint='',
+    [string]$Repo='',
+    [switch]$SomenteAgentes,
     [string]$BackendSSH='dietpi@lenovo',
     [string]$BackendDir='/dados_servidor/facilitador-core',
     [string[]]$Agents=@('facilitadorapp1','facilitadorapp2','facilitadorapp3','facilitadorapp4'),
@@ -10,7 +12,14 @@ param(
     [switch]$CheckOnly
 )
 $ErrorActionPreference='Stop'
-$Repo=Split-Path $PSScriptRoot -Parent
+if (-not $Repo) {$Repo=Split-Path $PSScriptRoot -Parent}
+$Repo=[IO.Path]::GetFullPath($Repo)
+$SourceRoot=Join-Path $Repo 'facilitador-agent'
+if (-not $CertificateThumbprint) {
+    $SelfSignature=Get-AuthenticodeSignature -LiteralPath $PSCommandPath
+    if ($SelfSignature.Status -ne 'Valid' -or -not $SelfSignature.SignerCertificate) {throw 'Assine a copia privada do aplicador ou informe o certificado institucional.'}
+    $CertificateThumbprint=$SelfSignature.SignerCertificate.Thumbprint
+}
 if ($Repo.StartsWith('\\')) {throw 'Execute pelo checkout local na estação institucional; não execute Git pelo SMB.'}
 $Branch=(& git -C $Repo branch --show-current)
 if ($LASTEXITCODE -or $Branch -ne 'master') {throw 'Use o checkout master revisado do rdgen.'}
@@ -27,16 +36,17 @@ foreach ($Store in @('Cert:\CurrentUser\My','Cert:\LocalMachine\My')) {
     if ($Found -and $Found.HasPrivateKey -and $Found.NotAfter -gt (Get-Date)) {$Certificate=$Found;break}
 }
 if (-not $Certificate) {throw 'Certificado válido com chave privada não encontrado nesta estação.'}
-$RunRoot=$PSScriptRoot
+$RunRoot=$SourceRoot
 if (-not $CheckOnly) {
     $Work=Join-Path $env:LOCALAPPDATA ('Temp\facilitador-release-'+[guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $Work | Out-Null
     $RunRoot=Join-Path $Work 'facilitador-agent'
-    Copy-Item -LiteralPath $PSScriptRoot -Destination $RunRoot -Recurse
+    Copy-Item -LiteralPath $SourceRoot -Destination $RunRoot -Recurse
     $Signed=Set-AuthenticodeSignature -FilePath (Join-Path $RunRoot 'preparar-iot-ldap-214.ps1') -Certificate $Certificate -HashAlgorithm SHA256
     if ($Signed.Status -ne 'Valid') {throw 'A assinatura do preparador não foi validada.'}
 }
-$Arguments=@((Join-Path $RunRoot 'atualizar-frota.py'),'--repo',$Repo,'--backend-ssh',$BackendSSH,'--backend-dir',$BackendDir,'--certificate',$CertificateThumbprint,'--agents')+$Agents
+$Arguments=@((Join-Path $RunRoot 'atualizar-frota.py'),'--repo',$Repo,'--backend-dir',$BackendDir,'--certificate',$CertificateThumbprint,'--agents')+$Agents
+if (-not $SomenteAgentes -and $BackendSSH) {$Arguments+=@('--backend-ssh',$BackendSSH)}
 if ($CheckOnly) {$Arguments+='--check-only'}
 & $Python @Arguments
 if ($LASTEXITCODE) {throw 'Entrega interrompida. Confira o último resultado antes de repetir.'}
